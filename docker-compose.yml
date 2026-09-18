@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: teamflow
+      POSTGRES_PASSWORD: teamflow
+      POSTGRES_DB: teamflow
+    ports:
+      # Host port 5433 avoids clashing with a locally running PostgreSQL on 5432.
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teamflow -d teamflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["/app/api"]
+    environment:
+      APP_ENV: development
+      APP_PORT: "8080"
+      DATABASE_URL: postgres://teamflow:teamflow@postgres:5432/teamflow?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: info
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["/app/worker"]
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://teamflow:teamflow@postgres:5432/teamflow?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
