@@ -8,6 +8,7 @@ import (
 func TestLoad_Defaults(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db")
 	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("JWT_SECRET", "test-secret")
 
 	cfg, err := Load()
 	if err != nil {
@@ -37,6 +38,7 @@ func TestLoad_MissingRequired(t *testing.T) {
 func TestLoad_InvalidEnvAndLevel(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/db")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("APP_ENV", "staging")
 	t.Setenv("LOG_LEVEL", "verbose")
 
@@ -48,6 +50,7 @@ func TestLoad_InvalidEnvAndLevel(t *testing.T) {
 func TestLoad_ParsesOverrides(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/db")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "a-sufficiently-long-production-secret-value")
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("APP_PORT", "9090")
 	t.Setenv("HTTP_READ_TIMEOUT", "30s")

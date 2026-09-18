@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/health"
 	"github.com/itsMinar/team-flow/internal/httpx"
@@ -18,9 +19,11 @@ import (
 // Dependencies holds everything the router needs. Dependencies are injected so
 // the router has no hidden global state and is easy to test.
 type Dependencies struct {
-	Config *config.Config
-	Logger *slog.Logger
-	Health *health.Handler
+	Config      *config.Config
+	Logger      *slog.Logger
+	Health      *health.Handler
+	AuthHandler *auth.Handler
+	AuthMW      *auth.Middleware
 }
 
 // NewRouter builds the top-level HTTP handler with the standard middleware
@@ -41,8 +44,11 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Get("/ready", deps.Health.Ready)
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// Feature routers are mounted here in subsequent phases
-		// (auth, organizations, teams, projects, tasks, ...).
+		// Feature routers are mounted here. Additional modules
+		// (organizations, teams, projects, tasks, ...) are added in later phases.
+		if deps.AuthHandler != nil {
+			deps.AuthHandler.RegisterRoutes(r, deps.AuthMW)
+		}
 	})
 
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) {

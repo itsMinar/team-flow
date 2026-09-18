@@ -23,9 +23,10 @@ type ErrorResponse struct {
 
 // ErrorBody carries client-safe error details.
 type ErrorBody struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	RequestID string `json:"request_id,omitempty"`
+	Code      string            `json:"code"`
+	Message   string            `json:"message"`
+	Details   map[string]string `json:"details,omitempty"`
+	RequestID string            `json:"request_id,omitempty"`
 }
 
 // WriteJSON writes v as a JSON response with the given status code.
@@ -66,6 +67,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err
 		Error: ErrorBody{
 			Code:      apiErr.Code,
 			Message:   apiErr.Message,
+			Details:   apiErr.Details,
 			RequestID: requestID,
 		},
 	})

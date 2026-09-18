@@ -1,0 +1,272 @@
+{
+  "info": {
+    "name": "TeamFlow - Phase 2",
+    "description": "TeamFlow health and authentication API. Import this collection and set its base_url variable (default: http://localhost:8080). Start the API and apply database migrations before sending requests. Edit the sample account variables, then run Register once or Login for an existing account. Successful registration, login, and refresh automatically save access_token, refresh_token, and user_id as collection variables. Protected requests inherit Bearer authentication. Run refresh requests sequentially: reusing a rotated token revokes the session family. Logout clears the local refresh token but retains the access token, which remains valid until expiry; Logout All Sessions then revokes every session for the current user and clears local tokens. Requests can run in the listed order. Before repeating the entire collection, change email to a new address, or skip Register and use Login. Use disposable development accounts only. Saved tokens and passwords are sensitive; do not share or commit exports containing real credentials. No environment file is required; avoid environment variables that shadow this collection's variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string",
+      "description": "API origin without a trailing slash; the version prefix is included in each auth request."
+    },
+    {
+      "key": "email",
+      "value": "teamflow.postman@example.com",
+      "type": "string",
+      "description": "Use a fresh email for registration, or an existing account's email for login."
+    },
+    {
+      "key": "password",
+      "value": "PostmanPassword123!",
+      "type": "string",
+      "description": "Sample development password only; registration passwords must not exceed 72 UTF-8 bytes."
+    },
+    {
+      "key": "first_name",
+      "value": "Postman",
+      "type": "string"
+    },
+    {
+      "key": "last_name",
+      "value": "User",
+      "type": "string"
+    },
+    {
+      "key": "organization_name",
+      "value": "Postman Test Organization",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by Register, Login, and Refresh Tokens."
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string",
+      "description": "Automatically replaced after each successful rotation. Never reuse an old value."
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated from successful authentication responses."
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('Request succeeded', function () {",
+          "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+          "});",
+          "pm.test('Response contains a JSON data envelope', function () {",
+          "    pm.response.to.have.jsonBody('data');",
+          "});",
+          "if (pm.response.code === 200 || pm.response.code === 201) {",
+          "    const data = pm.response.json().data;",
+          "    if (data && typeof data.access_token === 'string' && typeof data.refresh_token === 'string') {",
+          "        pm.test('Authentication response contains tokens', function () {",
+          "            pm.expect(data.access_token).to.not.equal('');",
+          "            pm.expect(data.refresh_token).to.not.equal('');",
+          "            pm.expect(data.token_type).to.equal('Bearer');",
+          "        });",
+          "        pm.collectionVariables.set('access_token', data.access_token);",
+          "        pm.collectionVariables.set('refresh_token', data.refresh_token);",
+          "        if (data.user && data.user.id) {",
+          "            pm.collectionVariables.set('user_id', data.user.id);",
+          "        }",
+          "    }",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Liveness",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/health",
+            "description": "Checks that the API process is running. Expected status: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Readiness",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/ready",
+            "description": "Checks PostgreSQL and Redis connectivity. Expected status: 200; 503 means a dependency is unavailable."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"first_name\": \"{{first_name}}\",\n  \"last_name\": \"{{last_name}}\",\n  \"organization_name\": \"{{organization_name}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/auth/register",
+            "description": "Creates a user, organization, Owner role, membership, and session. Expected status: 201. Tokens are saved automatically. An existing email returns 409; change the email variable or use Login."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Account created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Login",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/auth/login",
+            "description": "Logs in with the configured account and saves a new access/refresh token pair. Expected status: 200; invalid credentials return 401."
+          },
+          "response": []
+        },
+        {
+          "name": "Current User",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": "Returns the current user's profile using the collection's Bearer access token. Run Register or Login first. Expected status: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Tokens",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/auth/refresh",
+            "description": "Rotates the current refresh token and automatically saves both replacement tokens. Expected status: 200. Do not send concurrent refreshes or replay an old token; reuse revokes the entire session family."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/auth/logout",
+            "description": "Revokes the current refresh-token family. Expected status: 200. Clears the saved refresh token on success. The access token remains valid until expiry and is retained so Logout All Sessions can run next."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set('refresh_token', '');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Logout All Sessions",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/auth/logout-all",
+            "description": "Requires a valid access token. Revokes ALL of this user's refresh-token sessions across devices, not just the session created by this collection. Expected status: 200. Clears the collection's saved tokens and user ID on success. Already-issued access tokens remain valid server-side until expiry."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set('access_token', '');",
+                  "    pm.collectionVariables.set('refresh_token', '');",
+                  "    pm.collectionVariables.set('user_id', '');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    }
+  ]
+}

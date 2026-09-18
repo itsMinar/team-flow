@@ -24,6 +24,9 @@ type APIError struct {
 	Status  int
 	Code    string
 	Message string
+	// Details carries optional field-level information (e.g. validation errors).
+	// It must never contain sensitive or internal data.
+	Details map[string]string
 	// err is the wrapped underlying error, retained for logging but never
 	// serialized to the client.
 	err error
@@ -41,6 +44,17 @@ func (e *APIError) Unwrap() error { return e.err }
 // NewAPIError builds an APIError with the given attributes.
 func NewAPIError(status int, code, message string, cause error) *APIError {
 	return &APIError{Status: status, Code: code, Message: message, err: cause}
+}
+
+// NewValidationError builds a 400 APIError carrying per-field messages.
+func NewValidationError(fields map[string]string) *APIError {
+	return &APIError{
+		Status:  http.StatusBadRequest,
+		Code:    "VALIDATION_ERROR",
+		Message: "The request is invalid",
+		Details: fields,
+		err:     ErrValidation,
+	}
 }
 
 // FromError converts an arbitrary error into an APIError. Known sentinel errors

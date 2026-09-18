@@ -29,6 +29,7 @@ type Config struct {
 	Database DatabaseConfig
 	Redis    RedisConfig
 	Log      LogConfig
+	JWT      JWTConfig
 }
 
 // AppConfig holds general application settings.
@@ -65,6 +66,15 @@ type LogConfig struct {
 	Level string
 }
 
+// JWTConfig holds settings for signing and validating JSON Web Tokens and the
+// lifetimes of access and refresh tokens.
+type JWTConfig struct {
+	Secret     string
+	Issuer     string
+	AccessTTL  time.Duration
+	RefreshTTL time.Duration
+}
+
 // IsProduction reports whether the application is running in production.
 func (c *Config) IsProduction() bool {
 	return c.App.Env == EnvProduction
@@ -99,6 +109,12 @@ func Load() (*Config, error) {
 		Log: LogConfig{
 			Level: getEnv("LOG_LEVEL", "info"),
 		},
+		JWT: JWTConfig{
+			Secret:     getEnv("JWT_SECRET", ""),
+			Issuer:     getEnv("JWT_ISSUER", "teamflow"),
+			AccessTTL:  getEnvDuration("JWT_ACCESS_TTL", 15*time.Minute),
+			RefreshTTL: getEnvDuration("JWT_REFRESH_TTL", 720*time.Hour),
+		},
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -132,6 +148,18 @@ func (c *Config) validate() error {
 	case "debug", "info", "warn", "error":
 	default:
 		problems = append(problems, fmt.Sprintf("LOG_LEVEL %q is invalid (want debug|info|warn|error)", c.Log.Level))
+	}
+
+	if strings.TrimSpace(c.JWT.Secret) == "" {
+		problems = append(problems, "JWT_SECRET is required")
+	} else if c.App.Env == EnvProduction && len(c.JWT.Secret) < 32 {
+		problems = append(problems, "JWT_SECRET must be at least 32 characters in production")
+	}
+	if c.JWT.AccessTTL <= 0 {
+		problems = append(problems, "JWT_ACCESS_TTL must be positive")
+	}
+	if c.JWT.RefreshTTL <= c.JWT.AccessTTL {
+		problems = append(problems, "JWT_REFRESH_TTL must be greater than JWT_ACCESS_TTL")
 	}
 
 	if len(problems) > 0 {

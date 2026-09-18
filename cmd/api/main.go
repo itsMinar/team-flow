@@ -15,6 +15,7 @@ import (
 	"log/slog"
 
 	"github.com/itsMinar/team-flow/internal/api"
+	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/cache"
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/database"
@@ -65,10 +66,18 @@ func run() error {
 		"redis":    redisClient,
 	})
 
+	// Authentication wiring: JWT signer, service, HTTP handler, and middleware.
+	jwtService := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Issuer, cfg.JWT.AccessTTL)
+	authService := auth.NewService(db.Pool, jwtService, cfg.JWT.RefreshTTL, logger)
+	authHandler := auth.NewHandler(authService, logger)
+	authMW := auth.NewMiddleware(jwtService, logger)
+
 	router := api.NewRouter(api.Dependencies{
-		Config: cfg,
-		Logger: logger,
-		Health: healthHandler,
+		Config:      cfg,
+		Logger:      logger,
+		Health:      healthHandler,
+		AuthHandler: authHandler,
+		AuthMW:      authMW,
 	})
 
 	srv := &http.Server{
