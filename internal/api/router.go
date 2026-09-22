@@ -14,6 +14,7 @@ import (
 	"github.com/itsMinar/team-flow/internal/health"
 	"github.com/itsMinar/team-flow/internal/httpx"
 	"github.com/itsMinar/team-flow/internal/middleware"
+	"github.com/itsMinar/team-flow/internal/organizations"
 )
 
 // Dependencies holds everything the router needs. Dependencies are injected so
@@ -24,6 +25,8 @@ type Dependencies struct {
 	Health      *health.Handler
 	AuthHandler *auth.Handler
 	AuthMW      *auth.Middleware
+	OrgHandler  *organizations.Handler
+	OrgMW       *organizations.Middleware
 }
 
 // NewRouter builds the top-level HTTP handler with the standard middleware
@@ -48,6 +51,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		// (organizations, teams, projects, tasks, ...) are added in later phases.
 		if deps.AuthHandler != nil {
 			deps.AuthHandler.RegisterRoutes(r, deps.AuthMW)
+		}
+		if deps.OrgHandler != nil && deps.AuthMW != nil && deps.OrgMW != nil {
+			deps.OrgHandler.RegisterRoutes(r, deps.AuthMW, deps.OrgMW)
 		}
 	})
 

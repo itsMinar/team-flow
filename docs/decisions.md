@@ -2,6 +2,41 @@
 
 Short records of notable engineering decisions. Newest first within each phase.
 
+## Phase 3 — Multi-tenancy
+
+### RLS backstop requires FORCE, a per-transaction org context, and a non-superuser app role
+
+Migration 8 enabled Row Level Security and defined org-isolation policies, but
+three things left it inert: the application connected as a superuser (which
+PostgreSQL always exempts from RLS), the owner would be exempt without
+`FORCE ROW LEVEL SECURITY`, and nothing set the `app.current_org_id` the policies
+read. Migration 9 adds `FORCE ROW LEVEL SECURITY`; migration 10 gives the
+`teamflow_app` role (created NOLOGIN in migration 8) login plus the privileges
+and default privileges the app needs, and the Docker api/worker now connect as
+it while migrations keep running as the owner. The organizations service runs
+tenant-scoped statements inside a transaction that calls
+`set_config('app.current_org_id', <orgID>, true)`. The policies stay permissive
+when the setting is unset or empty, so login, registration, and organization
+switching (which span organizations) keep working. RLS is a defense-in-depth
+backstop behind explicit `WHERE organization_id = $n` scoping, not a substitute
+for it.
+
+### Tenant resolved from membership, cross-tenant returns 404
+
+The active organization is derived server-side by verifying the authenticated
+user has an active membership in the requested organization, never from a
+client header. Unknown organizations, non-members, and inactive memberships all
+return 404 so tenant existence never leaks across tenants; a suspended (but
+member-visible) organization returns 403. A `deleted` organization is checked
+before the generic non-active branch so it maps to 404 rather than 403.
+
+### Atomic organization provisioning
+
+Creating an organization inserts the organization, all default system roles
+(Owner, Admin, Manager, Member, Viewer), and the caller's Owner membership in a
+single transaction, so a partially provisioned tenant can never be observed.
+Slugs are generated from the name and de-duplicated with a random suffix.
+
 ## Phase 2 — Authentication
 
 ### Normalize legacy refresh-token IP columns

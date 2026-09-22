@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "TeamFlow - Phase 2",
-    "description": "TeamFlow health and authentication API. Import this collection and set its base_url variable (default: http://localhost:8080). Start the API and apply database migrations before sending requests. Edit the sample account variables, then run Register once or Login for an existing account. Successful registration, login, and refresh automatically save access_token, refresh_token, and user_id as collection variables. Protected requests inherit Bearer authentication. Run refresh requests sequentially: reusing a rotated token revokes the session family. Logout clears the local refresh token but retains the access token, which remains valid until expiry; Logout All Sessions then revokes every session for the current user and clears local tokens. Requests can run in the listed order. Before repeating the entire collection, change email to a new address, or skip Register and use Login. Use disposable development accounts only. Saved tokens and passwords are sensitive; do not share or commit exports containing real credentials. No environment file is required; avoid environment variables that shadow this collection's variables.",
+    "name": "TeamFlow - Phase 3",
+    "description": "TeamFlow health, authentication, and organization (multi-tenancy) API. Import this collection and set its base_url variable (default: http://localhost:8080). Start the API and apply database migrations before sending requests. Edit the sample account variables, then run Register once or Login for an existing account. Successful registration, login, and refresh automatically save access_token, refresh_token, and user_id as collection variables. Protected requests inherit Bearer authentication. Run refresh requests sequentially: reusing a rotated token revokes the session family. Logout clears the local refresh token but retains the access token, which remains valid until expiry; Logout All Sessions then revokes every session for the current user and clears local tokens. The Organizations folder covers the tenant surface: list the organizations you belong to, create a new organization (default roles and an Owner membership are provisioned atomically), read and rename an organization, and list its members. List My Organizations and Create Organization automatically save organization_id, which the org-scoped requests reuse. Cross-tenant reads return 404 to avoid leaking organization existence. Requests can run in the listed order. Before repeating the entire collection, change email to a new address, or skip Register and use Login. Use disposable development accounts only. Saved tokens and passwords are sensitive; do not share or commit exports containing real credentials. No environment file is required; avoid environment variables that shadow this collection's variables.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -65,6 +65,12 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated from successful authentication responses."
+    },
+    {
+      "key": "organization_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by Create Organization and List My Organizations; used by the organization-scoped requests."
     }
   ],
   "event": [
@@ -264,6 +270,112 @@
               }
             }
           ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Organizations",
+      "item": [
+        {
+          "name": "List My Organizations",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations",
+            "description": "Lists the active organizations the authenticated user belongs to (the organization-switching list). Run Register or Login first. Expected status: 200. Saves the first organization's id to organization_id."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data;",
+                  "    if (Array.isArray(data) && data.length > 0 && data[0].id) {",
+                  "        pm.collectionVariables.set('organization_id', data[0].id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Create Organization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Second Organization\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations",
+            "description": "Creates a new organization with the default system roles and an Owner membership for the caller, atomically. Expected status: 201. Saves the new organization's id to organization_id. name is required and limited to 150 characters."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Organization created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    const data = pm.response.json().data;",
+                  "    if (data && data.id) {",
+                  "        pm.collectionVariables.set('organization_id', data.id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get Organization",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}",
+            "description": "Returns a single organization the caller is an active member of, including the caller's role. Expected status: 200. Unknown or cross-tenant organizations return 404."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Organization",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Renamed Organization\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}",
+            "description": "Renames the organization. Requires the caller to be Owner or Admin; other roles return 403. Expected status: 200. name is required and limited to 150 characters."
+          },
+          "response": []
+        },
+        {
+          "name": "List Members",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/members",
+            "description": "Lists the members of the organization. Any active member may read. Expected status: 200. Cross-tenant access returns 404."
+          },
           "response": []
         }
       ]

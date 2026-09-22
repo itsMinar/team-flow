@@ -21,6 +21,7 @@ import (
 	"github.com/itsMinar/team-flow/internal/database"
 	"github.com/itsMinar/team-flow/internal/health"
 	"github.com/itsMinar/team-flow/internal/observability"
+	"github.com/itsMinar/team-flow/internal/organizations"
 )
 
 func main() {
@@ -72,12 +73,18 @@ func run() error {
 	authHandler := auth.NewHandler(authService, logger)
 	authMW := auth.NewMiddleware(jwtService, logger)
 
+	orgService := organizations.NewService(db.Pool, logger)
+	orgHandler := organizations.NewHandler(orgService, logger)
+	orgMW := organizations.NewMiddleware(orgService, logger)
+
 	router := api.NewRouter(api.Dependencies{
 		Config:      cfg,
 		Logger:      logger,
 		Health:      healthHandler,
 		AuthHandler: authHandler,
 		AuthMW:      authMW,
+		OrgHandler:  orgHandler,
+		OrgMW:       orgMW,
 	})
 
 	srv := &http.Server{

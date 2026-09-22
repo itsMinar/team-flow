@@ -5,8 +5,8 @@ employee management. Multiple independent organizations share the same
 infrastructure while their data stays strictly isolated.
 
 This repository is being built incrementally, phase by phase. **Phases 1
-(Foundation) and 2 (Authentication) are complete.** See [Roadmap](#roadmap)
-for what is done and what comes next.
+(Foundation), 2 (Authentication), and 3 (Multi-tenancy) are complete.** See
+[Roadmap](#roadmap) for what is done and what comes next.
 
 ## Overview
 
@@ -137,7 +137,9 @@ unset TEST_DATABASE_URL
 
 Do not run separate test processes against the same test database concurrently.
 The suite covers token rotation and reuse, concurrent refresh attempts, logout,
-logout-all, JWT expiration requirements, and HTTP authentication/validation.
+logout-all, JWT expiration requirements, HTTP authentication/validation, and
+cross-tenant isolation (reads, member listing, and updates across organizations
+must fail without leaking existence).
 
 ## Database / migrations
 
@@ -216,11 +218,36 @@ exits cleanly. The worker follows the same pattern.
 
 ## Multi-tenancy, RBAC, jobs
 
-Tenant enforcement, RBAC, and jobs are implemented in later phases; see the
-roadmap. Registration already creates the initial organization and membership.
-The tenant-isolation design requires tenant-owned rows to carry
-`organization_id`, tenant-scoped queries, and an active tenant derived from
-trusted auth context, never a client-supplied header.
+Multiple organizations share the same database while their data stays isolated.
+All organization endpoints are under `/api/v1/organizations` and require a
+Bearer access token:
+
+| Method | Path                             | Authorization          | Purpose                                                  |
+| ------ | -------------------------------- | ---------------------- | -------------------------------------------------------- |
+| GET    | `/organizations`                 | Any authenticated user | List organizations the caller belongs to (org switching) |
+| POST   | `/organizations`                 | Any authenticated user | Create an organization with default roles and an Owner   |
+| GET    | `/organizations/{orgID}`         | Active member          | Read an organization, including the caller's role        |
+| PATCH  | `/organizations/{orgID}`         | Owner or Admin         | Rename the organization                                  |
+| GET    | `/organizations/{orgID}/members` | Active member          | List the organization's members                          |
+
+The active tenant is derived server-side by verifying the authenticated user has
+an **active membership** in the requested organization; it is never taken from a
+client-supplied header. Unknown or cross-tenant organizations return **404**
+(not 403) so tenant existence never leaks. Creating an organization provisions
+the default system roles (Owner, Admin, Manager, Member, Viewer) and the Owner
+membership atomically in one transaction.
+
+Tenant-scoped statements run inside a transaction that sets
+`app.current_org_id`, and PostgreSQL Row Level Security policies (with
+`FORCE ROW LEVEL SECURITY`) confine those rows to the active organization as a
+defense-in-depth backstop behind the application's explicit
+`WHERE organization_id = $n` scoping. Because superusers and table owners bypass
+RLS, the api/worker connect as the non-superuser `teamflow_app` role (the Docker
+stack is configured this way; run the app as a non-superuser in production too),
+while migrations run as the owner. When no tenant context is set (login,
+registration, organization switching), the policies remain permissive so those
+flows keep working. RBAC and jobs are implemented in later phases; see the
+roadmap.
 
 ## Roadmap
 
@@ -228,7 +255,7 @@ trusted auth context, never a client-supplied header.
       router, request ID / recovery / logging / security middleware, health &
       readiness, migrations, Docker, Compose, Makefile.
 - [x] Phase 2 — Authentication (users, JWT, refresh tokens)
-- [ ] Phase 3 — Multi-tenancy (organizations, memberships, RLS)
+- [x] **Phase 3 — Multi-tenancy (organizations, memberships, RLS)**
 - [ ] Phase 4 — RBAC
 - [ ] Phase 5 — Teams
 - [ ] Phase 6 — Projects

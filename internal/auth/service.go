@@ -102,6 +102,20 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, meta RequestMe
 	if err != nil {
 		return nil, fmt.Errorf("create owner role: %w", err)
 	}
+	// Seed remaining default system roles so Phase 4 RBAC has them.
+	for _, extra := range []struct{ name, desc string }{
+		{"Admin", "Manage organization resources and members"},
+		{"Manager", "Manage teams, projects and tasks"},
+		{"Member", "Work on assigned projects and tasks"},
+		{"Viewer", "Read-only access"},
+	} {
+		desc := extra.desc
+		if _, err := qtx.CreateRole(ctx, db.CreateRoleParams{
+			OrganizationID: org.ID, Name: extra.name, Description: &desc, IsSystem: true,
+		}); err != nil {
+			return nil, fmt.Errorf("create role %s: %w", extra.name, err)
+		}
+	}
 
 	now := time.Now()
 	if _, err := qtx.CreateMembership(ctx, db.CreateMembershipParams{

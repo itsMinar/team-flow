@@ -37,7 +37,9 @@ services:
     environment:
       APP_ENV: development
       APP_PORT: '8080'
-      DATABASE_URL: postgres://teamflow:teamflow@postgres:5432/teamflow?sslmode=disable
+      # The app connects as the non-superuser teamflow_app role so Row Level
+      # Security is enforced. Migrations run separately as the owner (see Makefile).
+      DATABASE_URL: postgres://teamflow_app:teamflow_app@postgres:5432/teamflow?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: info
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
@@ -60,7 +62,8 @@ services:
     command: ['/app/worker']
     environment:
       APP_ENV: development
-      DATABASE_URL: postgres://teamflow:teamflow@postgres:5432/teamflow?sslmode=disable
+      # Non-superuser role so RLS is enforced; migrations run as the owner.
+      DATABASE_URL: postgres://teamflow_app:teamflow_app@postgres:5432/teamflow?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: info
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}

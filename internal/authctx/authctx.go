@@ -12,7 +12,10 @@ import (
 
 type contextKey int
 
-const principalKey contextKey = iota
+const (
+	principalKey contextKey = iota
+	tenantKey
+)
 
 // Principal is the authenticated identity derived from a validated access
 // token. It intentionally holds only identifiers; roles and permissions are
@@ -31,4 +34,25 @@ func WithPrincipal(ctx context.Context, p Principal) context.Context {
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	p, ok := ctx.Value(principalKey).(Principal)
 	return p, ok
+}
+
+// Tenant is the resolved active organization for a request. It is derived
+// server-side by verifying the authenticated user has an active membership in
+// the requested organization — never trusted from client headers alone.
+type Tenant struct {
+	OrganizationID uuid.UUID
+	MembershipID   uuid.UUID
+	RoleID         uuid.UUID
+	RoleName       string
+}
+
+// WithTenant returns a copy of ctx carrying the resolved tenant.
+func WithTenant(ctx context.Context, t Tenant) context.Context {
+	return context.WithValue(ctx, tenantKey, t)
+}
+
+// TenantFromContext returns the resolved tenant stored in ctx.
+func TenantFromContext(ctx context.Context) (Tenant, bool) {
+	t, ok := ctx.Value(tenantKey).(Tenant)
+	return t, ok
 }
