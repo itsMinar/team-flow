@@ -102,6 +102,9 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, meta RequestMe
 	if err != nil {
 		return nil, fmt.Errorf("create owner role: %w", err)
 	}
+	if err := seedRolePermissions(ctx, qtx, role.ID, ownerRoleName); err != nil {
+		return nil, fmt.Errorf("seed owner permissions: %w", err)
+	}
 	// Seed remaining default system roles so Phase 4 RBAC has them.
 	for _, extra := range []struct{ name, desc string }{
 		{"Admin", "Manage organization resources and members"},
@@ -110,10 +113,14 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, meta RequestMe
 		{"Viewer", "Read-only access"},
 	} {
 		desc := extra.desc
-		if _, err := qtx.CreateRole(ctx, db.CreateRoleParams{
+		extraRole, err := qtx.CreateRole(ctx, db.CreateRoleParams{
 			OrganizationID: org.ID, Name: extra.name, Description: &desc, IsSystem: true,
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, fmt.Errorf("create role %s: %w", extra.name, err)
+		}
+		if err := seedRolePermissions(ctx, qtx, extraRole.ID, extra.name); err != nil {
+			return nil, fmt.Errorf("seed permissions for role %s: %w", extra.name, err)
 		}
 	}
 
@@ -359,4 +366,25 @@ func invalidCredentials() error {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation
+}
+
+func seedRolePermissions(ctx context.Context, q *db.Queries, roleID uuid.UUID, roleName string) error {
+	permissions := []string{
+		"organizations.read",
+		"members.read",
+		"roles.read",
+	}
+	if roleName == "Owner" || roleName == "Admin" {
+		permissions = append(permissions, "organizations.update", "members.manage", "roles.manage")
+	}
+	for _, key := range permissions {
+		permission, err := q.GetPermissionByKey(ctx, key)
+		if err != nil {
+			return err
+		}
+		if err := q.AddRolePermission(ctx, db.AddRolePermissionParams{RoleID: roleID, PermissionID: permission.ID}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

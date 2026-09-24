@@ -11,6 +11,40 @@ import (
 	"github.com/google/uuid"
 )
 
+const addRolePermission = `-- name: AddRolePermission :exec
+INSERT INTO role_permissions (role_id, permission_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`
+
+type AddRolePermissionParams struct {
+	RoleID       uuid.UUID
+	PermissionID uuid.UUID
+}
+
+func (q *Queries) AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error {
+	_, err := q.db.Exec(ctx, addRolePermission, arg.RoleID, arg.PermissionID)
+	return err
+}
+
+const countMembershipsByRole = `-- name: CountMembershipsByRole :one
+SELECT count(*)
+FROM organization_memberships
+WHERE role_id = $1 AND organization_id = $2
+`
+
+type CountMembershipsByRoleParams struct {
+	RoleID         uuid.UUID
+	OrganizationID uuid.UUID
+}
+
+func (q *Queries) CountMembershipsByRole(ctx context.Context, arg CountMembershipsByRoleParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMembershipsByRole, arg.RoleID, arg.OrganizationID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createRole = `-- name: CreateRole :one
 INSERT INTO roles (organization_id, name, description, is_system)
 VALUES ($1, $2, $3, $4)
@@ -40,6 +74,38 @@ func (q *Queries) CreateRole(ctx context.Context, arg CreateRoleParams) (Role, e
 		&i.IsSystem,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteRole = `-- name: DeleteRole :exec
+DELETE FROM roles
+WHERE id = $1 AND organization_id = $2 AND is_system = false
+`
+
+type DeleteRoleParams struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+}
+
+func (q *Queries) DeleteRole(ctx context.Context, arg DeleteRoleParams) error {
+	_, err := q.db.Exec(ctx, deleteRole, arg.ID, arg.OrganizationID)
+	return err
+}
+
+const getPermissionByKey = `-- name: GetPermissionByKey :one
+SELECT id, key, description, created_at FROM permissions
+WHERE key = $1
+`
+
+func (q *Queries) GetPermissionByKey(ctx context.Context, key string) (Permission, error) {
+	row := q.db.QueryRow(ctx, getPermissionByKey, key)
+	var i Permission
+	err := row.Scan(
+		&i.ID,
+		&i.Key,
+		&i.Description,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -94,6 +160,55 @@ func (q *Queries) GetRoleByName(ctx context.Context, arg GetRoleByNameParams) (R
 	return i, err
 }
 
+const hasRolePermission = `-- name: HasRolePermission :one
+SELECT EXISTS (
+	SELECT 1
+	FROM role_permissions rp
+	JOIN permissions p ON p.id = rp.permission_id
+	WHERE rp.role_id = $1 AND p.key = $2
+)
+`
+
+type HasRolePermissionParams struct {
+	RoleID uuid.UUID
+	Key    string
+}
+
+func (q *Queries) HasRolePermission(ctx context.Context, arg HasRolePermissionParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasRolePermission, arg.RoleID, arg.Key)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const listPermissionKeysByRole = `-- name: ListPermissionKeysByRole :many
+SELECT p.key
+FROM permissions p
+JOIN role_permissions rp ON rp.permission_id = p.id
+WHERE rp.role_id = $1
+ORDER BY p.key
+`
+
+func (q *Queries) ListPermissionKeysByRole(ctx context.Context, roleID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, listPermissionKeysByRole, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		items = append(items, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRolesByOrganization = `-- name: ListRolesByOrganization :many
 SELECT id, organization_id, name, description, is_system, created_at, updated_at FROM roles
 WHERE organization_id = $1
@@ -126,4 +241,48 @@ func (q *Queries) ListRolesByOrganization(ctx context.Context, organizationID uu
 		return nil, err
 	}
 	return items, nil
+}
+
+const setRolePermissions = `-- name: SetRolePermissions :exec
+DELETE FROM role_permissions
+WHERE role_id = $1
+`
+
+func (q *Queries) SetRolePermissions(ctx context.Context, roleID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, setRolePermissions, roleID)
+	return err
+}
+
+const updateRole = `-- name: UpdateRole :one
+UPDATE roles
+SET name = $3, description = $4
+WHERE id = $1 AND organization_id = $2 AND is_system = false
+RETURNING id, organization_id, name, description, is_system, created_at, updated_at
+`
+
+type UpdateRoleParams struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Name           string
+	Description    *string
+}
+
+func (q *Queries) UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error) {
+	row := q.db.QueryRow(ctx, updateRole,
+		arg.ID,
+		arg.OrganizationID,
+		arg.Name,
+		arg.Description,
+	)
+	var i Role
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.Name,
+		&i.Description,
+		&i.IsSystem,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

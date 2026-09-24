@@ -85,6 +85,23 @@ func TestCrossTenantIsolation(t *testing.T) {
 	if got.Role != "Owner" {
 		t.Fatalf("role = %q, want Owner", got.Role)
 	}
+	roles, err := svc.ListRoles(ctx, userA, orgA)
+	if err != nil {
+		t.Fatalf("list roles: %v", err)
+	}
+	if len(roles) != 5 {
+		t.Fatalf("role count = %d, want 5", len(roles))
+	}
+	if len(roles[0].Permissions) == 0 {
+		t.Fatal("expected seeded role permissions")
+	}
+	custom, err := svc.CreateRole(ctx, userA, orgA, "Project Lead", nil, []string{"organizations.read", "members.read"})
+	if err != nil {
+		t.Fatalf("create custom role: %v", err)
+	}
+	if err := svc.DeleteRole(ctx, userA, orgA, custom.ID); err != nil {
+		t.Fatalf("delete custom role: %v", err)
+	}
 	mine, err := svc.ListMyOrganizations(ctx, userA)
 	if err != nil {
 		t.Fatalf("list mine: %v", err)

@@ -2,6 +2,29 @@
 
 Short records of notable engineering decisions. Newest first within each phase.
 
+## Phase 4 — RBAC
+
+### Database-backed permissions and immutable system roles
+
+Authorization is represented by six stable organization permissions:
+`organizations.read`, `organizations.update`, `members.read`,
+`members.manage`, `roles.read`, and `roles.manage`. Permissions are stored in
+PostgreSQL and assigned to organization-scoped roles through
+`role_permissions`; JWTs contain identity only and never carry authorization
+state. This keeps permission changes effective without reissuing access tokens.
+
+Every organization receives Owner, Admin, Manager, Member, and Viewer system
+roles with seeded permissions. System roles cannot be edited or deleted. Custom
+roles can be managed by callers with `roles.manage`, but a role cannot be
+deleted while members still reference it. Role assignment requires
+`members.manage`, prevents non-Owners from assigning or removing the Owner
+role, and prevents demoting the final Owner.
+
+Role and membership authorization is resolved inside the service layer after
+server-side tenant membership verification. Tenant-scoped permission queries
+run inside the same transaction-local RLS context used by organization data,
+so explicit authorization checks and database isolation remain aligned.
+
 ## Phase 3 — Multi-tenancy
 
 ### RLS backstop requires FORCE, a per-transaction org context, and a non-superuser app role

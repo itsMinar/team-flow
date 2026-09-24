@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/itsMinar/team-flow/internal/authctx"
@@ -31,6 +32,15 @@ var defaultRoles = []struct {
 	{"Member", "Work on assigned projects and tasks"},
 	{"Viewer", "Read-only access"},
 }
+
+const (
+	PermissionOrganizationsRead   = "organizations.read"
+	PermissionOrganizationsUpdate = "organizations.update"
+	PermissionMembersRead         = "members.read"
+	PermissionMembersManage       = "members.manage"
+	PermissionRolesRead           = "roles.read"
+	PermissionRolesManage         = "roles.manage"
+)
 
 // Service owns organization use cases.
 type Service struct {
@@ -65,6 +75,17 @@ type MemberDTO struct {
 	Role         string     `json:"role"`
 	Status       string     `json:"status"`
 	JoinedAt     *time.Time `json:"joined_at"`
+}
+
+type RoleDTO struct {
+	ID             uuid.UUID `json:"id"`
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	Description    *string   `json:"description,omitempty"`
+	IsSystem       bool      `json:"is_system"`
+	Permissions    []string  `json:"permissions"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // withOrgTx runs fn inside a transaction with app.current_org_id set to orgID
@@ -171,6 +192,9 @@ func (s *Service) GetOrganization(ctx context.Context, userID, orgID uuid.UUID) 
 	if err != nil {
 		return OrganizationDTO{}, err
 	}
+	if err := s.requirePermission(ctx, orgID, t.RoleID, PermissionOrganizationsRead); err != nil {
+		return OrganizationDTO{}, err
+	}
 	var org db.Organization
 	err = s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
 		o, e := s.q.WithTx(tx).GetOrganizationByID(ctx, orgID)
@@ -219,6 +243,10 @@ func (s *Service) CreateOrganization(ctx context.Context, userID uuid.UUID, name
 		if r.name == "Owner" {
 			ownerID = role.ID
 		}
+		permissions := permissionsForRole(r.name)
+		if err := setPermissions(ctx, qtx, role.ID, permissions); err != nil {
+			return OrganizationDTO{}, fmt.Errorf("seed permissions for role %s: %w", r.name, err)
+		}
 	}
 	now := time.Now()
 	if _, err := qtx.CreateMembership(ctx, db.CreateMembershipParams{
@@ -239,8 +267,8 @@ func (s *Service) UpdateOrganization(ctx context.Context, userID, orgID uuid.UUI
 	if err != nil {
 		return OrganizationDTO{}, err
 	}
-	if t.RoleName != "Owner" && t.RoleName != "Admin" {
-		return OrganizationDTO{}, httpx.ErrForbidden
+	if err := s.requirePermission(ctx, orgID, t.RoleID, PermissionOrganizationsUpdate); err != nil {
+		return OrganizationDTO{}, err
 	}
 	var org db.Organization
 	err = s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
@@ -260,11 +288,15 @@ func (s *Service) UpdateOrganization(ctx context.Context, userID, orgID uuid.UUI
 
 // ListMembers returns org members; any active member may list (read).
 func (s *Service) ListMembers(ctx context.Context, userID, orgID uuid.UUID) ([]MemberDTO, error) {
-	if _, err := s.ResolveTenant(ctx, userID, orgID); err != nil {
+	t, err := s.ResolveTenant(ctx, userID, orgID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requirePermission(ctx, orgID, t.RoleID, PermissionMembersRead); err != nil {
 		return nil, err
 	}
 	var rows []db.ListMembersByOrganizationRow
-	err := s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
+	err = s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
 		r, e := s.q.WithTx(tx).ListMembersByOrganization(ctx, orgID)
 		if e != nil {
 			return fmt.Errorf("list members: %w", e)
@@ -284,6 +316,256 @@ func (s *Service) ListMembers(ctx context.Context, userID, orgID uuid.UUID) ([]M
 		})
 	}
 	return out, nil
+}
+
+func (s *Service) requirePermission(ctx context.Context, orgID, roleID uuid.UUID, permission string) error {
+	var allowed bool
+	err := s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
+		var err error
+		allowed, err = s.q.WithTx(tx).HasRolePermission(ctx, db.HasRolePermissionParams{RoleID: roleID, Key: permission})
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("check permission: %w", err)
+	}
+	if !allowed {
+		return httpx.ErrForbidden
+	}
+	return nil
+}
+
+func roleDTO(role db.Role, permissions []string) RoleDTO {
+	return RoleDTO{
+		ID: role.ID, OrganizationID: role.OrganizationID, Name: role.Name,
+		Description: role.Description, IsSystem: role.IsSystem, Permissions: permissions,
+		CreatedAt: role.CreatedAt, UpdatedAt: role.UpdatedAt,
+	}
+}
+
+func (s *Service) ListRoles(ctx context.Context, userID, orgID uuid.UUID) ([]RoleDTO, error) {
+	t, err := s.ResolveTenant(ctx, userID, orgID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requirePermission(ctx, orgID, t.RoleID, PermissionRolesRead); err != nil {
+		return nil, err
+	}
+	var roles []db.Role
+	var result []RoleDTO
+	err = s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		var err error
+		roles, err = q.ListRolesByOrganization(ctx, orgID)
+		if err != nil {
+			return err
+		}
+		result = make([]RoleDTO, 0, len(roles))
+		for _, role := range roles {
+			permissions, err := q.ListPermissionKeysByRole(ctx, role.ID)
+			if err != nil {
+				return err
+			}
+			result = append(result, roleDTO(role, permissions))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list roles: %w", err)
+	}
+	return result, nil
+}
+
+func (s *Service) CreateRole(ctx context.Context, userID, orgID uuid.UUID, name string, description *string, permissions []string) (RoleDTO, error) {
+	t, err := s.ResolveTenant(ctx, userID, orgID)
+	if err != nil {
+		return RoleDTO{}, err
+	}
+	if err := s.requirePermission(ctx, orgID, t.RoleID, PermissionRolesManage); err != nil {
+		return RoleDTO{}, err
+	}
+	var role db.Role
+	err = s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		var err error
+		role, err = q.CreateRole(ctx, db.CreateRoleParams{OrganizationID: orgID, Name: name, Description: description})
+		if err != nil {
+			if isUniqueViolation(err) {
+				return httpx.NewAPIError(409, "ROLE_NAME_TAKEN", "A role with this name already exists", err)
+			}
+			return err
+		}
+		if err := setPermissions(ctx, q, role.ID, permissions); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return RoleDTO{}, fmt.Errorf("create role: %w", err)
+	}
+	return roleDTO(role, permissions), nil
+}
+
+func (s *Service) UpdateRole(ctx context.Context, userID, orgID, roleID uuid.UUID, name string, description *string, permissions []string) (RoleDTO, error) {
+	t, err := s.ResolveTenant(ctx, userID, orgID)
+	if err != nil {
+		return RoleDTO{}, err
+	}
+	if err := s.requirePermission(ctx, orgID, t.RoleID, PermissionRolesManage); err != nil {
+		return RoleDTO{}, err
+	}
+	var role db.Role
+	err = s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		current, err := q.GetRoleByID(ctx, db.GetRoleByIDParams{ID: roleID, OrganizationID: orgID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return httpx.ErrNotFound
+			}
+			return err
+		}
+		if current.IsSystem {
+			return httpx.NewAPIError(409, "SYSTEM_ROLE_IMMUTABLE", "System roles cannot be changed", nil)
+		}
+		role, err = q.UpdateRole(ctx, db.UpdateRoleParams{ID: roleID, OrganizationID: orgID, Name: name, Description: description})
+		if err != nil {
+			if isUniqueViolation(err) {
+				return httpx.NewAPIError(409, "ROLE_NAME_TAKEN", "A role with this name already exists", err)
+			}
+			return err
+		}
+		return setPermissions(ctx, q, role.ID, permissions)
+	})
+	if err != nil {
+		return RoleDTO{}, fmt.Errorf("update role: %w", err)
+	}
+	return roleDTO(role, permissions), nil
+}
+
+func (s *Service) DeleteRole(ctx context.Context, userID, orgID, roleID uuid.UUID) error {
+	t, err := s.ResolveTenant(ctx, userID, orgID)
+	if err != nil {
+		return err
+	}
+	if err := s.requirePermission(ctx, orgID, t.RoleID, PermissionRolesManage); err != nil {
+		return err
+	}
+	return s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		role, err := q.GetRoleByID(ctx, db.GetRoleByIDParams{ID: roleID, OrganizationID: orgID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return httpx.ErrNotFound
+			}
+			return err
+		}
+		if role.IsSystem {
+			return httpx.NewAPIError(409, "SYSTEM_ROLE_IMMUTABLE", "System roles cannot be deleted", nil)
+		}
+		count, err := q.CountMembershipsByRole(ctx, db.CountMembershipsByRoleParams{RoleID: roleID, OrganizationID: orgID})
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			return httpx.NewAPIError(409, "ROLE_IN_USE", "Reassign members before deleting this role", nil)
+		}
+		return q.DeleteRole(ctx, db.DeleteRoleParams{ID: roleID, OrganizationID: orgID})
+	})
+}
+
+func (s *Service) AssignMemberRole(ctx context.Context, userID, orgID, membershipID, roleID uuid.UUID) (MemberDTO, error) {
+	t, err := s.ResolveTenant(ctx, userID, orgID)
+	if err != nil {
+		return MemberDTO{}, err
+	}
+	if err := s.requirePermission(ctx, orgID, t.RoleID, PermissionMembersManage); err != nil {
+		return MemberDTO{}, err
+	}
+	var member MemberDTO
+	err = s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		current, err := q.GetMembershipByID(ctx, db.GetMembershipByIDParams{ID: membershipID, OrganizationID: orgID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return httpx.ErrNotFound
+			}
+			return err
+		}
+		currentRole, err := q.GetRoleByID(ctx, db.GetRoleByIDParams{ID: current.RoleID, OrganizationID: orgID})
+		if err != nil {
+			return err
+		}
+		newRole, err := q.GetRoleByID(ctx, db.GetRoleByIDParams{ID: roleID, OrganizationID: orgID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return httpx.NewAPIError(404, "ROLE_NOT_FOUND", "Role not found", err)
+			}
+			return err
+		}
+		if (currentRole.Name == "Owner" || newRole.Name == "Owner") && t.RoleName != "Owner" {
+			return httpx.ErrForbidden
+		}
+		if currentRole.Name == "Owner" && newRole.Name != "Owner" {
+			owners, err := q.CountActiveOwners(ctx, orgID)
+			if err != nil {
+				return err
+			}
+			if owners <= 1 {
+				return httpx.NewAPIError(409, "LAST_OWNER", "The organization must retain an Owner", nil)
+			}
+		}
+		updated, err := q.UpdateMembershipRole(ctx, db.UpdateMembershipRoleParams{ID: membershipID, OrganizationID: orgID, RoleID: roleID})
+		if err != nil {
+			return err
+		}
+		user, err := q.GetUserByID(ctx, updated.UserID)
+		if err != nil {
+			return err
+		}
+		member = MemberDTO{MembershipID: updated.ID, UserID: updated.UserID, Email: user.Email, FirstName: user.FirstName, LastName: user.LastName, Role: newRole.Name, Status: updated.Status, JoinedAt: updated.JoinedAt}
+		return nil
+	})
+	if err != nil {
+		return MemberDTO{}, fmt.Errorf("assign member role: %w", err)
+	}
+	return member, nil
+}
+
+func setPermissions(ctx context.Context, q *db.Queries, roleID uuid.UUID, permissions []string) error {
+	if err := q.SetRolePermissions(ctx, roleID); err != nil {
+		return err
+	}
+	for _, key := range permissions {
+		permission, err := q.GetPermissionByKey(ctx, key)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return httpx.NewAPIError(400, "UNKNOWN_PERMISSION", "Unknown permission", nil)
+			}
+			return err
+		}
+		if err := q.AddRolePermission(ctx, db.AddRolePermissionParams{RoleID: roleID, PermissionID: permission.ID}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func permissionsForRole(roleName string) []string {
+	if roleName == "Owner" || roleName == "Admin" {
+		return []string{
+			PermissionOrganizationsRead,
+			PermissionOrganizationsUpdate,
+			PermissionMembersRead,
+			PermissionMembersManage,
+			PermissionRolesRead,
+			PermissionRolesManage,
+		}
+	}
+	return []string{PermissionOrganizationsRead, PermissionMembersRead, PermissionRolesRead}
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 func (s *Service) uniqueSlug(ctx context.Context, name string) (string, error) {

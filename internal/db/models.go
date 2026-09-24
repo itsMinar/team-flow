@@ -30,6 +30,13 @@ type OrganizationMembership struct {
 	UpdatedAt      time.Time
 }
 
+type Permission struct {
+	ID          uuid.UUID
+	Key         string
+	Description string
+	CreatedAt   time.Time
+}
+
 type RefreshToken struct {
 	ID         uuid.UUID
 	UserID     uuid.UUID
@@ -51,6 +58,11 @@ type Role struct {
 	IsSystem       bool
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+type RolePermission struct {
+	RoleID       uuid.UUID
+	PermissionID uuid.UUID
 }
 
 type User struct {

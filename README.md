@@ -5,7 +5,8 @@ employee management. Multiple independent organizations share the same
 infrastructure while their data stays strictly isolated.
 
 This repository is being built incrementally, phase by phase. **Phases 1
-(Foundation), 2 (Authentication), and 3 (Multi-tenancy) are complete.** See
+(Foundation), 2 (Authentication), 3 (Multi-tenancy), and 4 (RBAC) are
+complete.** See
 [Roadmap](#roadmap) for what is done and what comes next.
 
 ## Overview
@@ -222,20 +223,29 @@ Multiple organizations share the same database while their data stays isolated.
 All organization endpoints are under `/api/v1/organizations` and require a
 Bearer access token:
 
-| Method | Path                             | Authorization          | Purpose                                                  |
-| ------ | -------------------------------- | ---------------------- | -------------------------------------------------------- |
-| GET    | `/organizations`                 | Any authenticated user | List organizations the caller belongs to (org switching) |
-| POST   | `/organizations`                 | Any authenticated user | Create an organization with default roles and an Owner   |
-| GET    | `/organizations/{orgID}`         | Active member          | Read an organization, including the caller's role        |
-| PATCH  | `/organizations/{orgID}`         | Owner or Admin         | Rename the organization                                  |
-| GET    | `/organizations/{orgID}/members` | Active member          | List the organization's members                          |
+| Method | Path                                                 | Authorization          | Purpose                                                  |
+| ------ | ---------------------------------------------------- | ---------------------- | -------------------------------------------------------- |
+| GET    | `/organizations`                                     | Any authenticated user | List organizations the caller belongs to (org switching) |
+| POST   | `/organizations`                                     | Any authenticated user | Create an organization with default roles and an Owner   |
+| GET    | `/organizations/{orgID}`                             | Active member          | Read an organization, including the caller's role        |
+| PATCH  | `/organizations/{orgID}`                             | `organizations.update` | Rename the organization                                  |
+| GET    | `/organizations/{orgID}/members`                     | `members.read`         | List the organization's members                          |
+| PATCH  | `/organizations/{orgID}/members/{membershipID}/role` | `members.manage`       | Assign a role to an active member                        |
+| GET    | `/organizations/{orgID}/roles`                       | `roles.read`           | List roles and permissions                               |
+| POST   | `/organizations/{orgID}/roles`                       | `roles.manage`         | Create a custom role                                     |
+| PATCH  | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Update a custom role and permissions                     |
+| DELETE | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Delete an unused custom role                             |
 
 The active tenant is derived server-side by verifying the authenticated user has
 an **active membership** in the requested organization; it is never taken from a
 client-supplied header. Unknown or cross-tenant organizations return **404**
 (not 403) so tenant existence never leaks. Creating an organization provisions
-the default system roles (Owner, Admin, Manager, Member, Viewer) and the Owner
-membership atomically in one transaction.
+the default system roles (Owner, Admin, Manager, Member, Viewer), their default
+permissions, and the Owner membership atomically in one transaction. The
+available permissions are `organizations.read`, `organizations.update`,
+`members.read`, `members.manage`, `roles.read`, and `roles.manage`. Owner and
+Admin receive all six; the other default roles receive read permissions only.
+System roles cannot be edited or deleted, and the last Owner cannot be demoted.
 
 Tenant-scoped statements run inside a transaction that sets
 `app.current_org_id`, and PostgreSQL Row Level Security policies (with
@@ -246,7 +256,7 @@ RLS, the api/worker connect as the non-superuser `teamflow_app` role (the Docker
 stack is configured this way; run the app as a non-superuser in production too),
 while migrations run as the owner. When no tenant context is set (login,
 registration, organization switching), the policies remain permissive so those
-flows keep working. RBAC and jobs are implemented in later phases; see the
+flows keep working. Background jobs are implemented in a later phase; see the
 roadmap.
 
 ## Roadmap
@@ -256,7 +266,7 @@ roadmap.
       readiness, migrations, Docker, Compose, Makefile.
 - [x] Phase 2 — Authentication (users, JWT, refresh tokens)
 - [x] **Phase 3 — Multi-tenancy (organizations, memberships, RLS)**
-- [ ] Phase 4 — RBAC
+- [x] **Phase 4 — RBAC:** permissions, custom role management, and member role assignment
 - [ ] Phase 5 — Teams
 - [ ] Phase 6 — Projects
 - [ ] Phase 7 — Tasks

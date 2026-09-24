@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "TeamFlow - Phase 3",
+    "name": "TeamFlow - Phase 4",
     "description": "TeamFlow health, authentication, and organization (multi-tenancy) API. Import this collection and set its base_url variable (default: http://localhost:8080). Start the API and apply database migrations before sending requests. Edit the sample account variables, then run Register once or Login for an existing account. Successful registration, login, and refresh automatically save access_token, refresh_token, and user_id as collection variables. Protected requests inherit Bearer authentication. Run refresh requests sequentially: reusing a rotated token revokes the session family. Logout clears the local refresh token but retains the access token, which remains valid until expiry; Logout All Sessions then revokes every session for the current user and clears local tokens. The Organizations folder covers the tenant surface: list the organizations you belong to, create a new organization (default roles and an Owner membership are provisioned atomically), read and rename an organization, and list its members. List My Organizations and Create Organization automatically save organization_id, which the org-scoped requests reuse. Cross-tenant reads return 404 to avoid leaking organization existence. Requests can run in the listed order. Before repeating the entire collection, change email to a new address, or skip Register and use Login. Use disposable development accounts only. Saved tokens and passwords are sensitive; do not share or commit exports containing real credentials. No environment file is required; avoid environment variables that shadow this collection's variables.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -71,6 +71,18 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated by Create Organization and List My Organizations; used by the organization-scoped requests."
+    },
+    {
+      "key": "role_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by List Roles or Create Role."
+    },
+    {
+      "key": "membership_id",
+      "value": "",
+      "type": "string",
+      "description": "Set to an active membership id before assigning a role."
     }
   ],
   "event": [
@@ -375,6 +387,112 @@
             "header": [{"key": "Accept", "value": "application/json"}],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/members",
             "description": "Lists the members of the organization. Any active member may read. Expected status: 200. Cross-tenant access returns 404."
+          },
+          "response": []
+        },
+        {
+          "name": "List Roles",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/roles",
+            "description": "Lists organization roles and their permissions. Requires roles.read. Expected status: 200. Saves the first role id to role_id."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data;",
+                  "    if (Array.isArray(data) && data.length > 0 && data[0].id) {",
+                  "        pm.collectionVariables.set('role_id', data[0].id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Create Custom Role",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Project Lead\",\n  \"description\": \"Can read organization and member data\",\n  \"permissions\": [\"organizations.read\", \"members.read\"]\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/roles",
+            "description": "Creates a custom role. Requires roles.manage. Expected status: 201."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text",
+                "exec": [
+                  "pm.test('Custom role created', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('role_id', pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Update Custom Role",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Project Lead\",\n  \"description\": \"Updated project lead permissions\",\n  \"permissions\": [\"organizations.read\", \"members.read\", \"roles.read\"]\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/roles/{{role_id}}",
+            "description": "Updates a custom role and replaces its permissions. Requires roles.manage. System roles cannot be changed. Expected status: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Assign Member Role",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role_id\": \"{{role_id}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/members/{{membership_id}}/role",
+            "description": "Assigns a role to an active member. Requires members.manage. Set membership_id first. The last Owner cannot be demoted. Expected status: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Custom Role",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/roles/{{role_id}}",
+            "description": "Deletes an unused custom role. Requires roles.manage. System roles and roles assigned to members cannot be deleted. Expected status: 200."
           },
           "response": []
         }

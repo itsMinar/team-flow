@@ -59,6 +59,11 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMW *auth.Middleware, tenantMW
 			// Get/Update resolve tenant inside the service (service-level authz).
 			r.Get("/", h.Get)
 			r.Patch("/", h.Update)
+			r.Get("/roles", h.ListRoles)
+			r.Post("/roles", h.CreateRole)
+			r.Patch("/roles/{roleID}", h.UpdateRole)
+			r.Delete("/roles/{roleID}", h.DeleteRole)
+			r.Patch("/members/{membershipID}/role", h.AssignMemberRole)
 			// Nested tenant-scoped routes use the middleware so handlers can rely
 			// on authctx.TenantFromContext.
 			r.Group(func(r chi.Router) {
