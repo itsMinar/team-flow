@@ -40,6 +40,8 @@ const (
 	PermissionMembersManage       = "members.manage"
 	PermissionRolesRead           = "roles.read"
 	PermissionRolesManage         = "roles.manage"
+	PermissionTeamsRead           = "teams.read"
+	PermissionTeamsManage         = "teams.manage"
 )
 
 // Service owns organization use cases.
@@ -334,6 +336,12 @@ func (s *Service) requirePermission(ctx context.Context, orgID, roleID uuid.UUID
 	return nil
 }
 
+// RequirePermission checks a caller's organization role inside tenant RLS
+// context. Feature services use this to keep authorization in the service layer.
+func (s *Service) RequirePermission(ctx context.Context, orgID, roleID uuid.UUID, permission string) error {
+	return s.requirePermission(ctx, orgID, roleID, permission)
+}
+
 func roleDTO(role db.Role, permissions []string) RoleDTO {
 	return RoleDTO{
 		ID: role.ID, OrganizationID: role.OrganizationID, Name: role.Name,
@@ -558,9 +566,11 @@ func permissionsForRole(roleName string) []string {
 			PermissionMembersManage,
 			PermissionRolesRead,
 			PermissionRolesManage,
+			PermissionTeamsRead,
+			PermissionTeamsManage,
 		}
 	}
-	return []string{PermissionOrganizationsRead, PermissionMembersRead, PermissionRolesRead}
+	return []string{PermissionOrganizationsRead, PermissionMembersRead, PermissionRolesRead, PermissionTeamsRead}
 }
 
 func isUniqueViolation(err error) bool {

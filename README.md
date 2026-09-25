@@ -5,7 +5,7 @@ employee management. Multiple independent organizations share the same
 infrastructure while their data stays strictly isolated.
 
 This repository is being built incrementally, phase by phase. **Phases 1
-(Foundation), 2 (Authentication), 3 (Multi-tenancy), and 4 (RBAC) are
+(Foundation), 2 (Authentication), 3 (Multi-tenancy), 4 (RBAC), and 5 (Teams) are
 complete.** See
 [Roadmap](#roadmap) for what is done and what comes next.
 
@@ -236,6 +236,20 @@ Bearer access token:
 | PATCH  | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Update a custom role and permissions                     |
 | DELETE | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Delete an unused custom role                             |
 
+Teams are organization-scoped and use the `teams.read` and `teams.manage`
+permissions:
+
+| Method | Path                                                           | Authorization  | Purpose                           |
+| ------ | -------------------------------------------------------------- | -------------- | --------------------------------- |
+| GET    | `/organizations/{orgID}/teams`                                 | `teams.read`   | List teams                        |
+| POST   | `/organizations/{orgID}/teams`                                 | `teams.manage` | Create a team                     |
+| GET    | `/organizations/{orgID}/teams/{teamID}`                        | `teams.read`   | Read a team                       |
+| PATCH  | `/organizations/{orgID}/teams/{teamID}`                        | `teams.manage` | Update a team                     |
+| DELETE | `/organizations/{orgID}/teams/{teamID}`                        | `teams.manage` | Delete a team                     |
+| GET    | `/organizations/{orgID}/teams/{teamID}/members`                | `teams.read`   | List team members                 |
+| POST   | `/organizations/{orgID}/teams/{teamID}/members`                | `teams.manage` | Add an active organization member |
+| DELETE | `/organizations/{orgID}/teams/{teamID}/members/{teamMemberID}` | `teams.manage` | Remove a team member              |
+
 The active tenant is derived server-side by verifying the authenticated user has
 an **active membership** in the requested organization; it is never taken from a
 client-supplied header. Unknown or cross-tenant organizations return **404**
@@ -243,8 +257,11 @@ client-supplied header. Unknown or cross-tenant organizations return **404**
 the default system roles (Owner, Admin, Manager, Member, Viewer), their default
 permissions, and the Owner membership atomically in one transaction. The
 available permissions are `organizations.read`, `organizations.update`,
-`members.read`, `members.manage`, `roles.read`, and `roles.manage`. Owner and
-Admin receive all six; the other default roles receive read permissions only.
+`members.read`, `members.manage`, `roles.read`, `roles.manage`, `teams.read`,
+and `teams.manage`. Owner and
+Admin receive all eight; the other default roles receive read permissions,
+including `teams.read`. Team memberships can only contain active members of
+the same organization.
 System roles cannot be edited or deleted, and the last Owner cannot be demoted.
 
 Tenant-scoped statements run inside a transaction that sets
@@ -267,7 +284,7 @@ roadmap.
 - [x] Phase 2 — Authentication (users, JWT, refresh tokens)
 - [x] **Phase 3 — Multi-tenancy (organizations, memberships, RLS)**
 - [x] **Phase 4 — RBAC:** permissions, custom role management, and member role assignment
-- [ ] Phase 5 — Teams
+- [x] Phase 5 — Teams: organization-scoped teams, team memberships, and authorization
 - [ ] Phase 6 — Projects
 - [ ] Phase 7 — Tasks
 - [ ] Phase 8 — Invitations

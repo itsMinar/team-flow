@@ -13,6 +13,7 @@ import (
 
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/organizations"
+	"github.com/itsMinar/team-flow/internal/teams"
 )
 
 func testPool(t *testing.T) *pgxpool.Pool {
@@ -101,6 +102,31 @@ func TestCrossTenantIsolation(t *testing.T) {
 	}
 	if err := svc.DeleteRole(ctx, userA, orgA, custom.ID); err != nil {
 		t.Fatalf("delete custom role: %v", err)
+	}
+	teamSvc := teams.NewService(pool, svc, logger)
+	team, err := teamSvc.Create(ctx, userA, orgA, "Engineering", nil)
+	if err != nil {
+		t.Fatalf("create team: %v", err)
+	}
+	if _, err := teamSvc.Get(ctx, userA, orgB, team.ID); err == nil {
+		t.Fatal("expected cross-tenant team read to fail")
+	}
+	if _, err := teamSvc.AddMember(ctx, userA, orgA, team.ID, userB); err == nil {
+		t.Fatal("expected non-member user to be rejected from team")
+	}
+	member, err := teamSvc.AddMember(ctx, userA, orgA, team.ID, userA)
+	if err != nil {
+		t.Fatalf("add team member: %v", err)
+	}
+	teamMembers, err := teamSvc.ListMembers(ctx, userA, orgA, team.ID)
+	if err != nil || len(teamMembers) != 1 {
+		t.Fatalf("list team members: %v %v", teamMembers, err)
+	}
+	if err := teamSvc.RemoveMember(ctx, userA, orgA, team.ID, member.ID); err != nil {
+		t.Fatalf("remove team member: %v", err)
+	}
+	if err := teamSvc.Delete(ctx, userA, orgA, team.ID); err != nil {
+		t.Fatalf("delete team: %v", err)
 	}
 	mine, err := svc.ListMyOrganizations(ctx, userA)
 	if err != nil {

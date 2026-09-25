@@ -65,6 +65,24 @@ type RolePermission struct {
 	PermissionID uuid.UUID
 }
 
+type Team struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Name           string
+	Description    *string
+	CreatedBy      uuid.UUID
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type TeamMember struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	TeamID         uuid.UUID
+	UserID         uuid.UUID
+	CreatedAt      time.Time
+}
+
 type User struct {
 	ID              uuid.UUID
 	Email           string

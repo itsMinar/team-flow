@@ -2,6 +2,22 @@
 
 Short records of notable engineering decisions. Newest first within each phase.
 
+## Phase 5 — Teams
+
+### Organization-owned teams with membership invariants
+
+Teams are organization-owned resources with unique names per organization.
+Team memberships carry the organization ID and reference both the team and
+organization through a composite foreign key, preventing mismatched tenant
+IDs even for direct database writes. The service verifies that a user has an
+active membership in the organization before adding them to a team.
+
+The `teams.read` and `teams.manage` permissions are stored in PostgreSQL and
+resolved at request time. Owner and Admin receive both permissions; Manager,
+Member, and Viewer receive read access. Every team operation re-resolves the
+tenant and permission in the service layer and runs tenant-scoped SQL inside a
+transaction-local RLS context.
+
 ## Phase 4 — RBAC
 
 ### Database-backed permissions and immutable system roles

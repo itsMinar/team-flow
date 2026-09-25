@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "TeamFlow - Phase 4",
+    "name": "TeamFlow - Phase 5",
     "description": "TeamFlow health, authentication, and organization (multi-tenancy) API. Import this collection and set its base_url variable (default: http://localhost:8080). Start the API and apply database migrations before sending requests. Edit the sample account variables, then run Register once or Login for an existing account. Successful registration, login, and refresh automatically save access_token, refresh_token, and user_id as collection variables. Protected requests inherit Bearer authentication. Run refresh requests sequentially: reusing a rotated token revokes the session family. Logout clears the local refresh token but retains the access token, which remains valid until expiry; Logout All Sessions then revokes every session for the current user and clears local tokens. The Organizations folder covers the tenant surface: list the organizations you belong to, create a new organization (default roles and an Owner membership are provisioned atomically), read and rename an organization, and list its members. List My Organizations and Create Organization automatically save organization_id, which the org-scoped requests reuse. Cross-tenant reads return 404 to avoid leaking organization existence. Requests can run in the listed order. Before repeating the entire collection, change email to a new address, or skip Register and use Login. Use disposable development accounts only. Saved tokens and passwords are sensitive; do not share or commit exports containing real credentials. No environment file is required; avoid environment variables that shadow this collection's variables.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -83,6 +83,18 @@
       "value": "",
       "type": "string",
       "description": "Set to an active membership id before assigning a role."
+    },
+    {
+      "key": "team_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by Create Team."
+    },
+    {
+      "key": "team_member_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by Add Team Member."
     }
   ],
   "event": [
@@ -493,6 +505,103 @@
             "header": [{"key": "Accept", "value": "application/json"}],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/roles/{{role_id}}",
             "description": "Deletes an unused custom role. Requires roles.manage. System roles and roles assigned to members cannot be deleted. Expected status: 200."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Teams",
+      "item": [
+        {
+          "name": "List Teams",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/teams",
+            "description": "Lists organization teams. Requires teams.read. Expected status: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Team",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Engineering\",\n  \"description\": \"Platform work\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/teams",
+            "description": "Creates a team. Requires teams.manage. Expected status: 201."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('team_id', pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get Team Members",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/teams/{{team_id}}/members",
+            "description": "Lists team members. Requires teams.read. Expected status: 200."
+          },
+          "response": []
+        },
+        {
+          "name": "Add Team Member",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/teams/{{team_id}}/members",
+            "description": "Adds an active organization member. Requires teams.manage. Expected status: 201."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('team_member_id', pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Remove Team Member",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/teams/{{team_id}}/members/{{team_member_id}}",
+            "description": "Removes a team membership. Requires teams.manage. Expected status: 200."
           },
           "response": []
         }

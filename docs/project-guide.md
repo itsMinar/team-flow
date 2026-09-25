@@ -6,19 +6,20 @@ This document explains what TeamFlow can do today, how its parts fit together, h
 
 TeamFlow is a Go backend for a multi-tenant team and project-management SaaS product. It is designed for multiple organizations to share one deployment and database while keeping organization data isolated.
 
-The project is currently an API foundation with four completed phases:
+The project is currently an API foundation with five completed phases:
 
 1. Foundation and infrastructure
 2. Authentication and session security
 3. Organizations, memberships, and tenant isolation
 4. Permission-based role management
+5. Teams and team memberships
 
 The codebase is a modular monolith. It has one repository and two executable processes:
 
 - `cmd/api`: HTTP API server
 - `cmd/worker`: background-worker process scaffold
 
-The current release is useful for building and testing secure SaaS foundations. It can create users and organizations, authenticate users, manage memberships at a basic level, and enforce tenant boundaries. Product features such as teams, projects, and tasks are planned but are not implemented yet.
+The current release is useful for building and testing secure SaaS foundations. It can create users and organizations, authenticate users, manage memberships, enforce tenant boundaries, and manage organization teams. Projects and tasks remain planned.
 
 ## 2. What You Can Do Today
 
@@ -56,6 +57,15 @@ The current release is useful for building and testing secure SaaS foundations. 
 - Enforce permissions for organization, member, and role operations.
 - Return `404 Not Found` for unknown or cross-tenant organizations so their existence is not exposed.
 - Treat inactive memberships as unable to access tenant data.
+
+### Teams
+
+- Create, read, update, and delete organization teams.
+- List team members and add or remove active organization members.
+- Enforce `teams.read` for reads and `teams.manage` for mutations.
+- Reject duplicate team names within an organization.
+- Keep team data isolated with explicit organization scope, composite foreign
+  key protection, and PostgreSQL RLS.
 
 ### Operations and reliability
 
@@ -176,6 +186,22 @@ All organization routes require a valid bearer access token and are under `/api/
 | `PATCH`  | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Updates a custom role and its permissions.               |
 | `DELETE` | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Deletes an unused custom role.                           |
 
+### Team endpoints
+
+| Method   | Path                                                           | Authorization  | Description                                   |
+| -------- | -------------------------------------------------------------- | -------------- | --------------------------------------------- |
+| `GET`    | `/organizations/{orgID}/teams`                                 | `teams.read`   | Lists teams in the organization.              |
+| `POST`   | `/organizations/{orgID}/teams`                                 | `teams.manage` | Creates a team.                               |
+| `GET`    | `/organizations/{orgID}/teams/{teamID}`                        | `teams.read`   | Reads a team.                                 |
+| `PATCH`  | `/organizations/{orgID}/teams/{teamID}`                        | `teams.manage` | Updates a team.                               |
+| `DELETE` | `/organizations/{orgID}/teams/{teamID}`                        | `teams.manage` | Deletes a team and its memberships.           |
+| `GET`    | `/organizations/{orgID}/teams/{teamID}/members`                | `teams.read`   | Lists team members.                           |
+| `POST`   | `/organizations/{orgID}/teams/{teamID}/members`                | `teams.manage` | Adds an active organization member to a team. |
+| `DELETE` | `/organizations/{orgID}/teams/{teamID}/members/{teamMemberID}` | `teams.manage` | Removes a team membership.                    |
+
+Team create and update requests use `{"name":"Engineering","description":"Platform work"}`.
+Team membership requests use `{"user_id":"<organization-member-uuid>"}`.
+
 #### Create an organization
 
 ```bash
@@ -253,6 +279,7 @@ Handlers decode requests and write responses. Services contain business rules an
 | `internal/middleware`    | Shared HTTP middleware.                                                           |
 | `internal/observability` | Structured logging and request ID support.                                        |
 | `internal/organizations` | Organization services, handlers, routes, and tenant resolution.                   |
+| `internal/teams`         | Team services, handlers, routes, authorization, and team memberships.             |
 | `internal/validation`    | Reusable request validation.                                                      |
 
 ## 5. Repository Layout
@@ -275,6 +302,7 @@ internal/
   middleware/              Shared HTTP middleware
   observability/            JSON logging and request IDs
   organizations/            Organization and tenant logic
+  teams/                    Team and team-membership logic
   validation/              Request validation
 
 migrations/                Versioned PostgreSQL migrations
@@ -428,6 +456,7 @@ The current migrations cover:
 - Forced RLS for table owners
 - The non-superuser `teamflow_app` login role and privileges
 - Permissions and role-permission assignments for RBAC
+- Teams and team memberships with composite organization constraints and RLS
 
 ### How tenant access works
 
@@ -484,6 +513,8 @@ Organization creation is atomic: the organization, default roles, and Owner memb
 - Authorization is resolved from the database, never from JWT claims.
 - System roles are immutable, custom roles cannot be deleted while assigned, and
   the organization must always retain at least one Owner.
+- Teams require `teams.read` or `teams.manage`; a team member must already be
+  an active member of the same organization.
 
 ## 10. Testing
 
@@ -511,7 +542,7 @@ Run static checks:
 make lint
 ```
 
-The test suite covers configuration validation, middleware, health checks, HTTP routing, validation, password rules, JWT behavior, refresh-token rotation, token reuse, logout behavior, authentication handlers, organization services, RBAC permission mapping and validation, and tenant isolation.
+The test suite covers configuration validation, middleware, health checks, HTTP routing, validation, password rules, JWT behavior, refresh-token rotation, token reuse, logout behavior, authentication handlers, organization services, RBAC permission mapping and validation, team validation and tenant-scoped team workflows, and tenant isolation.
 
 ### Database integration tests
 
@@ -603,7 +634,6 @@ The container API publishes port `8080`. Stop it before `make dev`, or set a dif
 
 The following capabilities are planned and should not be assumed to exist yet:
 
-- Teams and team membership workflows
 - Projects
 - Tasks and task workflows
 - Invitations and email-based onboarding
@@ -620,7 +650,7 @@ The planned roadmap is:
 2. Authentication - complete
 3. Multi-tenancy - complete
 4. RBAC - complete
-5. Teams - planned
+5. Teams - complete
 6. Projects - planned
 7. Tasks - planned
 8. Invitations - planned
@@ -638,13 +668,12 @@ Architecture decisions and the reasoning behind major security and infrastructur
 A practical order for continuing the project is:
 
 1. Add membership management: invite, activate, suspend, and remove members.
-2. Add teams and team membership within an organization.
-3. Add projects with explicit organization and team scoping.
-4. Add tasks, statuses, assignments, and due dates.
-5. Add background jobs for invitations, notifications, and other asynchronous work.
-6. Add rate limiting and audit events before exposing the API publicly.
-7. Expand OpenAPI or Postman documentation as each endpoint is added.
-8. Add production deployment configuration, secret management, metrics, tracing, backups, and migration runbooks.
+2. Add projects with explicit organization and team scoping.
+3. Add tasks, statuses, assignments, and due dates.
+4. Add background jobs for invitations, notifications, and other asynchronous work.
+5. Add rate limiting and audit events before exposing the API publicly.
+6. Expand OpenAPI or Postman documentation as each endpoint is added.
+7. Add production deployment configuration, secret management, metrics, tracing, backups, and migration runbooks.
 
 ## 15. Related Files
 

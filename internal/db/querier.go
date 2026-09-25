@@ -12,15 +12,18 @@ import (
 
 type Querier interface {
 	AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error
+	AddTeamMember(ctx context.Context, arg AddTeamMemberParams) (TeamMember, error)
 	CountActiveOwners(ctx context.Context, organizationID uuid.UUID) (int64, error)
 	CountMembershipsByRole(ctx context.Context, arg CountMembershipsByRoleParams) (int64, error)
 	CreateMembership(ctx context.Context, arg CreateMembershipParams) (OrganizationMembership, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
+	CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteExpiredRefreshTokens(ctx context.Context) error
 	DeleteRole(ctx context.Context, arg DeleteRoleParams) error
+	DeleteTeam(ctx context.Context, arg DeleteTeamParams) error
 	GetMembership(ctx context.Context, arg GetMembershipParams) (OrganizationMembership, error)
 	GetMembershipByID(ctx context.Context, arg GetMembershipByIDParams) (OrganizationMembership, error)
 	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
@@ -30,6 +33,7 @@ type Querier interface {
 	GetRefreshTokenByHashForUpdate(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetRoleByID(ctx context.Context, arg GetRoleByIDParams) (Role, error)
 	GetRoleByName(ctx context.Context, arg GetRoleByNameParams) (Role, error)
+	GetTeam(ctx context.Context, arg GetTeamParams) (Team, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	HasRolePermission(ctx context.Context, arg HasRolePermissionParams) (bool, error)
@@ -37,13 +41,17 @@ type Querier interface {
 	ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]ListMembershipsByUserRow, error)
 	ListPermissionKeysByRole(ctx context.Context, roleID uuid.UUID) ([]string, error)
 	ListRolesByOrganization(ctx context.Context, organizationID uuid.UUID) ([]Role, error)
+	ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]ListTeamMembersRow, error)
+	ListTeams(ctx context.Context, organizationID uuid.UUID) ([]Team, error)
 	OrganizationSlugExists(ctx context.Context, slug string) (bool, error)
+	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
 	RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error
 	RevokeRefreshToken(ctx context.Context, arg RevokeRefreshTokenParams) error
 	RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID) error
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	UpdateMembershipRole(ctx context.Context, arg UpdateMembershipRoleParams) (OrganizationMembership, error)
 	UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error)
+	UpdateTeam(ctx context.Context, arg UpdateTeamParams) (Team, error)
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error
 }
 
