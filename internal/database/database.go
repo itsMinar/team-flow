@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/itsMinar/team-flow/internal/config"
@@ -57,4 +59,23 @@ func (p *Pool) Health(ctx context.Context) error {
 // Close releases all connections held by the pool.
 func (p *Pool) Close() {
 	p.Pool.Close()
+}
+
+// WithTenantTx runs fn in a transaction whose RLS context is confined to orgID.
+func WithTenantTx(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, fn func(pgx.Tx) error) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_org_id', $1, true)", orgID.String()); err != nil {
+		return fmt.Errorf("set tenant context: %w", err)
+	}
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
 }

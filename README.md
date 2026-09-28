@@ -5,8 +5,8 @@ employee management. Multiple independent organizations share the same
 infrastructure while their data stays strictly isolated.
 
 This repository is being built incrementally, phase by phase. **Phases 1
-(Foundation), 2 (Authentication), 3 (Multi-tenancy), 4 (RBAC), and 5 (Teams) are
-complete.** See
+(Foundation), 2 (Authentication), 3 (Multi-tenancy), 4 (RBAC), 5 (Teams), and
+6 (Projects) are complete.** See
 [Roadmap](#roadmap) for what is done and what comes next.
 
 ## Overview
@@ -250,6 +250,23 @@ permissions:
 | POST   | `/organizations/{orgID}/teams/{teamID}/members`                | `teams.manage` | Add an active organization member |
 | DELETE | `/organizations/{orgID}/teams/{teamID}/members/{teamMemberID}` | `teams.manage` | Remove a team member              |
 
+Projects are organization-scoped and optionally belong to an organization
+team. They use `projects.read`, `projects.create`, `projects.update`, and
+`projects.delete` permissions:
+
+| Method | Path                                                   | Authorization     | Purpose                              |
+| ------ | ------------------------------------------------------ | ----------------- | ------------------------------------ |
+| GET    | `/organizations/{orgID}/projects`                      | `projects.read`   | List filtered and paginated projects |
+| POST   | `/organizations/{orgID}/projects`                      | `projects.create` | Create a project                     |
+| GET    | `/organizations/{orgID}/projects/{projectID}`          | `projects.read`   | Read a project                       |
+| PATCH  | `/organizations/{orgID}/projects/{projectID}`          | `projects.update` | Update a project                     |
+| DELETE | `/organizations/{orgID}/projects/{projectID}`          | `projects.delete` | Delete a project                     |
+| GET    | `/organizations/{orgID}/projects/{projectID}/activity` | `projects.read`   | Read project activity                |
+
+Project lists accept `page`, `page_size` (maximum 100), `status`, `priority`,
+`team_id`, `sort`, and `order` (`asc` or `desc`). Supported sort fields are
+`created_at`, `updated_at`, `name`, `due_date`, and `priority`.
+
 The active tenant is derived server-side by verifying the authenticated user has
 an **active membership** in the requested organization; it is never taken from a
 client-supplied header. Unknown or cross-tenant organizations return **404**
@@ -258,10 +275,10 @@ the default system roles (Owner, Admin, Manager, Member, Viewer), their default
 permissions, and the Owner membership atomically in one transaction. The
 available permissions are `organizations.read`, `organizations.update`,
 `members.read`, `members.manage`, `roles.read`, `roles.manage`, `teams.read`,
-and `teams.manage`. Owner and
-Admin receive all eight; the other default roles receive read permissions,
-including `teams.read`. Team memberships can only contain active members of
-the same organization.
+`teams.manage`, `projects.read`, `projects.create`, `projects.update`, and
+`projects.delete`. Owner and Admin receive all twelve; the other default roles
+receive permissions appropriate to their role. Team memberships and project
+teams can only reference active resources in the same organization.
 System roles cannot be edited or deleted, and the last Owner cannot be demoted.
 
 Tenant-scoped statements run inside a transaction that sets
@@ -285,7 +302,7 @@ roadmap.
 - [x] **Phase 3 — Multi-tenancy (organizations, memberships, RLS)**
 - [x] **Phase 4 — RBAC:** permissions, custom role management, and member role assignment
 - [x] Phase 5 — Teams: organization-scoped teams, team memberships, and authorization
-- [ ] Phase 6 — Projects
+- [x] Phase 6 — Projects: filtering, sorting, pagination, authorization, and activity logging
 - [ ] Phase 7 — Tasks
 - [ ] Phase 8 — Invitations
 - [ ] Phase 9 — API keys

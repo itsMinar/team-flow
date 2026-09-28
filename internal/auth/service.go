@@ -15,6 +15,7 @@ import (
 
 	"github.com/itsMinar/team-flow/internal/db"
 	"github.com/itsMinar/team-flow/internal/httpx"
+	"github.com/itsMinar/team-flow/internal/permissions"
 )
 
 const (
@@ -369,15 +370,7 @@ func isUniqueViolation(err error) bool {
 }
 
 func seedRolePermissions(ctx context.Context, q *db.Queries, roleID uuid.UUID, roleName string) error {
-	permissions := []string{
-		"organizations.read",
-		"members.read",
-		"roles.read",
-	}
-	if roleName == "Owner" || roleName == "Admin" {
-		permissions = append(permissions, "organizations.update", "members.manage", "roles.manage")
-	}
-	for _, key := range permissions {
+	for _, key := range permissions.DefaultForRole(roleName) {
 		permission, err := q.GetPermissionByKey(ctx, key)
 		if err != nil {
 			return err

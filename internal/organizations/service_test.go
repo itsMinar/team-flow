@@ -17,22 +17,6 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-func TestPermissionsForRole(t *testing.T) {
-	owner := permissionsForRole("Owner")
-	if len(owner) != 8 {
-		t.Fatalf("owner permissions = %d, want 8", len(owner))
-	}
-	viewer := permissionsForRole("Viewer")
-	if len(viewer) != 4 {
-		t.Fatalf("viewer permissions = %d, want 4", len(viewer))
-	}
-	for _, permission := range viewer {
-		if permission == PermissionOrganizationsUpdate || permission == PermissionMembersManage || permission == PermissionRolesManage {
-			t.Fatalf("viewer received management permission %q", permission)
-		}
-	}
-}
-
 func TestValidateRoleRequest(t *testing.T) {
 	if err := validateRoleRequest(roleRequest{Name: "Analyst", Permissions: []string{PermissionRolesRead}}); err != nil {
 		t.Fatalf("valid role request: %v", err)

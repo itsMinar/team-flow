@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/itsMinar/team-flow/internal/authctx"
+	"github.com/itsMinar/team-flow/internal/database"
 	"github.com/itsMinar/team-flow/internal/db"
 	"github.com/itsMinar/team-flow/internal/httpx"
 	"github.com/itsMinar/team-flow/internal/organizations"
@@ -55,32 +56,11 @@ func NewService(pool *pgxpool.Pool, orgs *organizations.Service, logger *slog.Lo
 }
 
 func (s *Service) withOrgTx(ctx context.Context, orgID uuid.UUID, fn func(pgx.Tx) error) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_org_id', $1, true)", orgID.String()); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(tx); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
-	}
-	return nil
+	return database.WithTenantTx(ctx, s.pool, orgID, fn)
 }
 
 func (s *Service) authorize(ctx context.Context, userID, orgID uuid.UUID, permission string) (authctx.Tenant, error) {
-	tenant, err := s.orgs.ResolveTenant(ctx, userID, orgID)
-	if err != nil {
-		return authctx.Tenant{}, err
-	}
-	if err := s.orgs.RequirePermission(ctx, orgID, tenant.RoleID, permission); err != nil {
-		return authctx.Tenant{}, err
-	}
-	return tenant, nil
+	return s.orgs.Authorize(ctx, userID, orgID, permission)
 }
 
 func toDTO(team db.Team) TeamDTO {

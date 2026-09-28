@@ -95,6 +95,12 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated by Add Team Member."
+    },
+    {
+      "key": "project_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by Create Project."
     }
   ],
   "event": [
@@ -602,6 +608,62 @@
             "header": [{"key": "Accept", "value": "application/json"}],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/teams/{{team_id}}/members/{{team_member_id}}",
             "description": "Removes a team membership. Requires teams.manage. Expected status: 200."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Projects",
+      "item": [
+        {
+          "name": "List Projects",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects?page=1&page_size=20&sort=created_at&order=desc",
+            "description": "Lists projects with filtering, sorting, and pagination. Requires projects.read."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Project",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Website Redesign\",\n  \"description\": \"Public website refresh\",\n  \"status\": \"planning\",\n  \"priority\": \"high\",\n  \"team_id\": \"{{team_id}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects",
+            "description": "Creates a project. Requires projects.create."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('project_id', pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Project Activity",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects/{{project_id}}/activity",
+            "description": "Lists project activity. Requires projects.read."
           },
           "response": []
         }

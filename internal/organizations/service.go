@@ -17,8 +17,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/itsMinar/team-flow/internal/authctx"
+	"github.com/itsMinar/team-flow/internal/database"
 	"github.com/itsMinar/team-flow/internal/db"
 	"github.com/itsMinar/team-flow/internal/httpx"
+	"github.com/itsMinar/team-flow/internal/permissions"
 )
 
 // System roles seeded for every organization.
@@ -34,14 +36,14 @@ var defaultRoles = []struct {
 }
 
 const (
-	PermissionOrganizationsRead   = "organizations.read"
-	PermissionOrganizationsUpdate = "organizations.update"
-	PermissionMembersRead         = "members.read"
-	PermissionMembersManage       = "members.manage"
-	PermissionRolesRead           = "roles.read"
-	PermissionRolesManage         = "roles.manage"
-	PermissionTeamsRead           = "teams.read"
-	PermissionTeamsManage         = "teams.manage"
+	PermissionOrganizationsRead   = permissions.OrganizationsRead
+	PermissionOrganizationsUpdate = permissions.OrganizationsUpdate
+	PermissionMembersRead         = permissions.MembersRead
+	PermissionMembersManage       = permissions.MembersManage
+	PermissionRolesRead           = permissions.RolesRead
+	PermissionRolesManage         = permissions.RolesManage
+	PermissionTeamsRead           = permissions.TeamsRead
+	PermissionTeamsManage         = permissions.TeamsManage
 )
 
 // Service owns organization use cases.
@@ -94,21 +96,7 @@ type RoleDTO struct {
 // for that transaction. RLS policies then confine tenant-scoped statements to
 // the active organization, backstopping the application-level WHERE clauses.
 func (s *Service) withOrgTx(ctx context.Context, orgID uuid.UUID, fn func(pgx.Tx) error) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_org_id', $1, true)", orgID.String()); err != nil {
-		return fmt.Errorf("set tenant context: %w", err)
-	}
-	if err := fn(tx); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
-	}
-	return nil
+	return database.WithTenantTx(ctx, s.pool, orgID, fn)
 }
 
 // ResolveTenant verifies userID has an active membership in orgID and that the
@@ -245,8 +233,7 @@ func (s *Service) CreateOrganization(ctx context.Context, userID uuid.UUID, name
 		if r.name == "Owner" {
 			ownerID = role.ID
 		}
-		permissions := permissionsForRole(r.name)
-		if err := setPermissions(ctx, qtx, role.ID, permissions); err != nil {
+		if err := setPermissions(ctx, qtx, role.ID, permissions.DefaultForRole(r.name)); err != nil {
 			return OrganizationDTO{}, fmt.Errorf("seed permissions for role %s: %w", r.name, err)
 		}
 	}
@@ -336,10 +323,17 @@ func (s *Service) requirePermission(ctx context.Context, orgID, roleID uuid.UUID
 	return nil
 }
 
-// RequirePermission checks a caller's organization role inside tenant RLS
-// context. Feature services use this to keep authorization in the service layer.
-func (s *Service) RequirePermission(ctx context.Context, orgID, roleID uuid.UUID, permission string) error {
-	return s.requirePermission(ctx, orgID, roleID, permission)
+// Authorize is the shared service-layer check: active membership in an active
+// organization plus a permission granted to the caller's current role.
+func (s *Service) Authorize(ctx context.Context, userID, orgID uuid.UUID, permission string) (authctx.Tenant, error) {
+	tenant, err := s.ResolveTenant(ctx, userID, orgID)
+	if err != nil {
+		return authctx.Tenant{}, err
+	}
+	if err := s.requirePermission(ctx, orgID, tenant.RoleID, permission); err != nil {
+		return authctx.Tenant{}, err
+	}
+	return tenant, nil
 }
 
 func roleDTO(role db.Role, permissions []string) RoleDTO {
@@ -555,22 +549,6 @@ func setPermissions(ctx context.Context, q *db.Queries, roleID uuid.UUID, permis
 		}
 	}
 	return nil
-}
-
-func permissionsForRole(roleName string) []string {
-	if roleName == "Owner" || roleName == "Admin" {
-		return []string{
-			PermissionOrganizationsRead,
-			PermissionOrganizationsUpdate,
-			PermissionMembersRead,
-			PermissionMembersManage,
-			PermissionRolesRead,
-			PermissionRolesManage,
-			PermissionTeamsRead,
-			PermissionTeamsManage,
-		}
-	}
-	return []string{PermissionOrganizationsRead, PermissionMembersRead, PermissionRolesRead, PermissionTeamsRead}
 }
 
 func isUniqueViolation(err error) bool {

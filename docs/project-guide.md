@@ -6,20 +6,21 @@ This document explains what TeamFlow can do today, how its parts fit together, h
 
 TeamFlow is a Go backend for a multi-tenant team and project-management SaaS product. It is designed for multiple organizations to share one deployment and database while keeping organization data isolated.
 
-The project is currently an API foundation with five completed phases:
+The project is currently an API foundation with six completed phases:
 
 1. Foundation and infrastructure
 2. Authentication and session security
 3. Organizations, memberships, and tenant isolation
 4. Permission-based role management
 5. Teams and team memberships
+6. Projects, pagination, filtering, sorting, authorization, and activity
 
 The codebase is a modular monolith. It has one repository and two executable processes:
 
 - `cmd/api`: HTTP API server
 - `cmd/worker`: background-worker process scaffold
 
-The current release is useful for building and testing secure SaaS foundations. It can create users and organizations, authenticate users, manage memberships, enforce tenant boundaries, and manage organization teams. Projects and tasks remain planned.
+The current release is useful for building and testing secure SaaS foundations. It can create users and organizations, authenticate users, manage memberships, enforce tenant boundaries, and manage organization teams and projects. Tasks remain planned.
 
 ## 2. What You Can Do Today
 
@@ -66,6 +67,16 @@ The current release is useful for building and testing secure SaaS foundations. 
 - Reject duplicate team names within an organization.
 - Keep team data isolated with explicit organization scope, composite foreign
   key protection, and PostgreSQL RLS.
+
+### Projects
+
+- Create, read, update, and delete organization projects.
+- Optionally associate a project with a team from the same organization.
+- Filter by status, priority, or team and sort by approved fields.
+- Return bounded pagination metadata for project collections.
+- Record project creation, update, and deletion activity transactionally.
+- Enforce `projects.read`, `projects.create`, `projects.update`, and
+  `projects.delete` in the service layer.
 
 ### Operations and reliability
 
@@ -201,6 +212,21 @@ All organization routes require a valid bearer access token and are under `/api/
 
 Team create and update requests use `{"name":"Engineering","description":"Platform work"}`.
 Team membership requests use `{"user_id":"<organization-member-uuid>"}`.
+
+### Project endpoints
+
+| Method   | Path                                                   | Authorization     | Description                            |
+| -------- | ------------------------------------------------------ | ----------------- | -------------------------------------- |
+| `GET`    | `/organizations/{orgID}/projects`                      | `projects.read`   | Lists filtered and paginated projects. |
+| `POST`   | `/organizations/{orgID}/projects`                      | `projects.create` | Creates a project.                     |
+| `GET`    | `/organizations/{orgID}/projects/{projectID}`          | `projects.read`   | Reads a project.                       |
+| `PATCH`  | `/organizations/{orgID}/projects/{projectID}`          | `projects.update` | Updates a project.                     |
+| `DELETE` | `/organizations/{orgID}/projects/{projectID}`          | `projects.delete` | Deletes a project.                     |
+| `GET`    | `/organizations/{orgID}/projects/{projectID}/activity` | `projects.read`   | Lists project activity.                |
+
+Project list query parameters are `page`, `page_size` (maximum 100), `status`,
+`priority`, `team_id`, `sort`, and `order`. Supported sorts are `created_at`,
+`updated_at`, `name`, `due_date`, and `priority`.
 
 #### Create an organization
 
@@ -457,6 +483,7 @@ The current migrations cover:
 - The non-superuser `teamflow_app` login role and privileges
 - Permissions and role-permission assignments for RBAC
 - Teams and team memberships with composite organization constraints and RLS
+- Projects, project activity, filtering, sorting, pagination, and RLS
 
 ### How tenant access works
 
@@ -515,6 +542,8 @@ Organization creation is atomic: the organization, default roles, and Owner memb
   the organization must always retain at least one Owner.
 - Teams require `teams.read` or `teams.manage`; a team member must already be
   an active member of the same organization.
+- Projects require the appropriate project permission; optional teams must
+  belong to the same organization and activity is append-only.
 
 ## 10. Testing
 
@@ -542,7 +571,7 @@ Run static checks:
 make lint
 ```
 
-The test suite covers configuration validation, middleware, health checks, HTTP routing, validation, password rules, JWT behavior, refresh-token rotation, token reuse, logout behavior, authentication handlers, organization services, RBAC permission mapping and validation, team validation and tenant-scoped team workflows, and tenant isolation.
+The test suite covers configuration validation, middleware, health checks, HTTP routing, validation, password rules, JWT behavior, refresh-token rotation, token reuse, logout behavior, authentication handlers, organization services, RBAC permission mapping and validation, team validation, project validation and filtering, project activity, authorization, tenant-scoped workflows, RLS, and tenant isolation.
 
 ### Database integration tests
 
@@ -634,7 +663,6 @@ The container API publishes port `8080`. Stop it before `make dev`, or set a dif
 
 The following capabilities are planned and should not be assumed to exist yet:
 
-- Projects
 - Tasks and task workflows
 - Invitations and email-based onboarding
 - API keys
@@ -651,7 +679,7 @@ The planned roadmap is:
 3. Multi-tenancy - complete
 4. RBAC - complete
 5. Teams - complete
-6. Projects - planned
+6. Projects - complete
 7. Tasks - planned
 8. Invitations - planned
 9. API keys - planned
@@ -668,12 +696,11 @@ Architecture decisions and the reasoning behind major security and infrastructur
 A practical order for continuing the project is:
 
 1. Add membership management: invite, activate, suspend, and remove members.
-2. Add projects with explicit organization and team scoping.
-3. Add tasks, statuses, assignments, and due dates.
-4. Add background jobs for invitations, notifications, and other asynchronous work.
-5. Add rate limiting and audit events before exposing the API publicly.
-6. Expand OpenAPI or Postman documentation as each endpoint is added.
-7. Add production deployment configuration, secret management, metrics, tracing, backups, and migration runbooks.
+2. Add tasks, statuses, assignments, and due dates.
+3. Add background jobs for invitations, notifications, and other asynchronous work.
+4. Add rate limiting and audit events before exposing the API publicly.
+5. Expand OpenAPI or Postman documentation as each endpoint is added.
+6. Add production deployment configuration, secret management, metrics, tracing, backups, and migration runbooks.
 
 ## 15. Related Files
 

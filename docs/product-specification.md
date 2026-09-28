@@ -97,6 +97,24 @@ return typed domain errors which the HTTP layer maps to status codes.
 - Unit tests, integration coverage, formatting, static analysis, and race
   tests are run before the phase is marked complete.
 
+## Phase 6 Definition of Done
+
+- Projects belong to one organization and may reference only a team from that
+  organization.
+- Project fields include name, description, status, priority, dates, creator,
+  and timestamps with database constraints and indexes.
+- Project lists support bounded pagination, status/priority/team filtering, and
+  a whitelisted sort field and order.
+- `projects.read`, `projects.create`, `projects.update`, and
+  `projects.delete` are resolved from current organization RBAC state.
+- Project writes and activity records commit atomically in one tenant-scoped
+  transaction.
+- Project activity is append-only, tenant-isolated, paginated, and safe for
+  clients to read.
+- Cross-tenant resources return safe errors without leaking project data.
+- Unit, integration, RLS, authorization, migration, formatting, static, and
+  race checks pass before Phase 6 is marked complete.
+
 ## Definition of Done for the Product
 
 The product is complete only when the API, worker, migrations, seed data,

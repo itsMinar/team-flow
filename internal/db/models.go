@@ -10,6 +10,17 @@ import (
 	"github.com/google/uuid"
 )
 
+type ActivityLog struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	ActorUserID    *uuid.UUID
+	Action         string
+	ResourceType   string
+	ResourceID     uuid.UUID
+	Metadata       []byte
+	CreatedAt      time.Time
+}
+
 type Organization struct {
 	ID        uuid.UUID
 	Name      string
@@ -35,6 +46,21 @@ type Permission struct {
 	Key         string
 	Description string
 	CreatedAt   time.Time
+}
+
+type Project struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	TeamID         *uuid.UUID
+	Name           string
+	Description    *string
+	Status         string
+	Priority       string
+	StartDate      *time.Time
+	DueDate        *time.Time
+	CreatedBy      uuid.UUID
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type RefreshToken struct {

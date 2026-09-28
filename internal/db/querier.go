@@ -14,14 +14,19 @@ type Querier interface {
 	AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error
 	AddTeamMember(ctx context.Context, arg AddTeamMemberParams) (TeamMember, error)
 	CountActiveOwners(ctx context.Context, organizationID uuid.UUID) (int64, error)
+	CountActivityByResource(ctx context.Context, arg CountActivityByResourceParams) (int64, error)
 	CountMembershipsByRole(ctx context.Context, arg CountMembershipsByRoleParams) (int64, error)
+	CountProjects(ctx context.Context, arg CountProjectsParams) (int64, error)
+	CreateActivityLog(ctx context.Context, arg CreateActivityLogParams) error
 	CreateMembership(ctx context.Context, arg CreateMembershipParams) (OrganizationMembership, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
+	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteExpiredRefreshTokens(ctx context.Context) error
+	DeleteProject(ctx context.Context, arg DeleteProjectParams) error
 	DeleteRole(ctx context.Context, arg DeleteRoleParams) error
 	DeleteTeam(ctx context.Context, arg DeleteTeamParams) error
 	GetMembership(ctx context.Context, arg GetMembershipParams) (OrganizationMembership, error)
@@ -29,6 +34,8 @@ type Querier interface {
 	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
 	GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error)
 	GetPermissionByKey(ctx context.Context, key string) (Permission, error)
+	GetProject(ctx context.Context, arg GetProjectParams) (Project, error)
+	GetProjectForUpdate(ctx context.Context, arg GetProjectForUpdateParams) (Project, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetRefreshTokenByHashForUpdate(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetRoleByID(ctx context.Context, arg GetRoleByIDParams) (Role, error)
@@ -37,9 +44,12 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	HasRolePermission(ctx context.Context, arg HasRolePermissionParams) (bool, error)
+	ListActivityByResource(ctx context.Context, arg ListActivityByResourceParams) ([]ActivityLog, error)
 	ListMembersByOrganization(ctx context.Context, organizationID uuid.UUID) ([]ListMembersByOrganizationRow, error)
 	ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]ListMembershipsByUserRow, error)
 	ListPermissionKeysByRole(ctx context.Context, roleID uuid.UUID) ([]string, error)
+	// Sort keys are fixed CASE branches, so client input never becomes SQL.
+	ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error)
 	ListRolesByOrganization(ctx context.Context, organizationID uuid.UUID) ([]Role, error)
 	ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]ListTeamMembersRow, error)
 	ListTeams(ctx context.Context, organizationID uuid.UUID) ([]Team, error)
@@ -50,6 +60,7 @@ type Querier interface {
 	RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID) error
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	UpdateMembershipRole(ctx context.Context, arg UpdateMembershipRoleParams) (OrganizationMembership, error)
+	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
 	UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error)
 	UpdateTeam(ctx context.Context, arg UpdateTeamParams) (Team, error)
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error

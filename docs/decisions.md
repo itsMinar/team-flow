@@ -2,6 +2,24 @@
 
 Short records of notable engineering decisions. Newest first within each phase.
 
+## Phase 6 — Projects
+
+### Tenant-scoped projects with transactional activity
+
+Projects carry an organization ID and may reference a team only through a
+composite `(team_id, organization_id)` foreign key. This prevents direct SQL
+writes from attaching a project to a team in another organization. Deleting a
+team clears the optional project association rather than deleting the project.
+
+Project list sorting uses fixed SQL `CASE` branches and a service-validated
+allowlist, so user input is never interpolated into SQL. Collection responses
+use bounded page and page-size values and return total metadata.
+
+Project mutations resolve current RBAC permissions in the service layer and
+write an append-only activity event in the same tenant transaction as the
+project change. Activity rows have RLS and application-level UPDATE/DELETE
+privileges are revoked.
+
 ## Phase 5 — Teams
 
 ### Organization-owned teams with membership invariants
