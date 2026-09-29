@@ -101,6 +101,12 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated by Create Project."
+    },
+    {
+      "key": "task_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by Create Task."
     }
   ],
   "event": [
@@ -664,6 +670,110 @@
             "header": [{"key": "Accept", "value": "application/json"}],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects/{{project_id}}/activity",
             "description": "Lists project activity. Requires projects.read."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Tasks",
+      "item": [
+        {
+          "name": "List Tasks",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/tasks?page=1&page_size=20&sort=due_date&order=asc",
+            "description": "Lists the organization's tasks with filtering, sorting, and pagination. Requires tasks.read."
+          },
+          "response": []
+        },
+        {
+          "name": "List Tasks By Project",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects/{{project_id}}/tasks?page=1&page_size=20&sort=created_at&order=desc",
+            "description": "Lists the tasks of one project. The project comes from the URL, so a project_id query parameter cannot widen the result. Requires tasks.read."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Ship the billing page\",\n  \"description\": \"Behind the feature flag\",\n  \"status\": \"in_progress\",\n  \"priority\": \"high\",\n  \"assignee_id\": \"{{user_id}}\",\n  \"due_date\": \"2026-12-24\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects/{{project_id}}/tasks",
+            "description": "Creates a task in a project. The assignee must be an active member of the organization. Requires tasks.create."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('task_id', pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get Task",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/tasks/{{task_id}}",
+            "description": "Reads a task. Requires tasks.read."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Task",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"done\",\n  \"assignee_id\": null\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/tasks/{{task_id}}",
+            "description": "Updates a task, including reassignment. Send null to clear a field; omit it to keep the current value. Requires tasks.update."
+          },
+          "response": []
+        },
+        {
+          "name": "Task Activity",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/tasks/{{task_id}}/activity?page=1&page_size=20",
+            "description": "Lists append-only task activity. Requires tasks.read."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Task",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/tasks/{{task_id}}",
+            "description": "Deletes a task. Requires tasks.delete."
           },
           "response": []
         }

@@ -23,6 +23,7 @@ import (
 	"github.com/itsMinar/team-flow/internal/observability"
 	"github.com/itsMinar/team-flow/internal/organizations"
 	"github.com/itsMinar/team-flow/internal/projects"
+	"github.com/itsMinar/team-flow/internal/tasks"
 	"github.com/itsMinar/team-flow/internal/teams"
 )
 
@@ -82,6 +83,8 @@ func run() error {
 	teamHandler := teams.NewHandler(teamService, logger)
 	projectService := projects.NewService(db.Pool, orgService)
 	projectHandler := projects.NewHandler(projectService, logger)
+	taskService := tasks.NewService(db.Pool, orgService)
+	taskHandler := tasks.NewHandler(taskService, logger)
 
 	router := api.NewRouter(api.Dependencies{
 		Config:       cfg,
@@ -93,6 +96,7 @@ func run() error {
 		OrgMW:        orgMW,
 		TeamsHandler: teamHandler,
 		Projects:     projectHandler,
+		Tasks:        taskHandler,
 	})
 
 	srv := &http.Server{

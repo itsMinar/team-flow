@@ -13,12 +13,12 @@ func TestDefaultForRole(t *testing.T) {
 	}
 
 	manager := DefaultForRole("Manager")
-	for _, want := range []string{ProjectsCreate, ProjectsUpdate, ProjectsRead, TeamsRead} {
+	for _, want := range []string{ProjectsCreate, ProjectsUpdate, ProjectsRead, TeamsRead, TasksRead, TasksCreate, TasksUpdate} {
 		if !slices.Contains(manager, want) {
 			t.Fatalf("manager missing %q", want)
 		}
 	}
-	for _, denied := range []string{ProjectsDelete, TeamsManage, RolesManage, MembersManage, OrganizationsUpdate} {
+	for _, denied := range []string{ProjectsDelete, TasksDelete, TeamsManage, RolesManage, MembersManage, OrganizationsUpdate} {
 		if slices.Contains(manager, denied) {
 			t.Fatalf("manager received %q", denied)
 		}

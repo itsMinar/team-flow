@@ -5,8 +5,8 @@ employee management. Multiple independent organizations share the same
 infrastructure while their data stays strictly isolated.
 
 This repository is being built incrementally, phase by phase. **Phases 1
-(Foundation), 2 (Authentication), 3 (Multi-tenancy), 4 (RBAC), 5 (Teams), and
-6 (Projects) are complete.** See
+(Foundation), 2 (Authentication), 3 (Multi-tenancy), 4 (RBAC), 5 (Teams), 6
+(Projects), and 7 (Tasks) are complete.** See
 [Roadmap](#roadmap) for what is done and what comes next.
 
 ## Overview
@@ -64,10 +64,17 @@ internal/
   config/      Environment configuration + validation
   database/    PostgreSQL (pgx) connection pool
   db/          Generated sqlc queries and models
+  fieldtypes/  Shared calendar-date and partial-update field types
   health/      Liveness and readiness handlers
   httpx/       Response envelope + typed error mapping
   middleware/  Reusable HTTP middleware
   observability/ Structured logging (and later metrics/tracing)
+  organizations/ Organizations, memberships, roles, and tenant resolution
+  permissions/ Permission keys and default role grants
+  projects/    Organization-scoped projects and project activity
+  tasks/       Project-scoped tasks, assignment, and task activity
+  teams/       Organization-scoped teams and team memberships
+  validation/  Reusable request validation
 migrations/    Versioned SQL migrations (golang-migrate)
 queries/       SQL source for sqlc
 ```
@@ -140,7 +147,9 @@ Do not run separate test processes against the same test database concurrently.
 The suite covers token rotation and reuse, concurrent refresh attempts, logout,
 logout-all, JWT expiration requirements, HTTP authentication/validation, and
 cross-tenant isolation (reads, member listing, and updates across organizations
-must fail without leaking existence).
+must fail without leaking existence). It also covers team, project, and task
+authorization, filtering, pagination, activity recording, tenant-scoped foreign
+keys, and Row Level Security.
 
 ## Database / migrations
 
@@ -267,6 +276,29 @@ Project lists accept `page`, `page_size` (maximum 100), `status`, `priority`,
 `team_id`, `sort`, and `order` (`asc` or `desc`). Supported sort fields are
 `created_at`, `updated_at`, `name`, `due_date`, and `priority`.
 
+Tasks belong to a project of the organization and support assignment to active
+organization members. They use the `tasks.read`, `tasks.create`,
+`tasks.update`, and `tasks.delete` permissions:
+
+| Method | Path                                                         | Authorization   | Purpose                                  |
+| ------ | ------------------------------------------------------------ | --------------- | ---------------------------------------- |
+| GET    | `/organizations/{orgID}/tasks`                                | `tasks.read`    | List filtered and paginated tasks        |
+| GET    | `/organizations/{orgID}/tasks/{taskID}`                       | `tasks.read`    | Read a task                              |
+| PATCH  | `/organizations/{orgID}/tasks/{taskID}`                       | `tasks.update`  | Update a task, including assignment      |
+| DELETE | `/organizations/{orgID}/tasks/{taskID}`                       | `tasks.delete`  | Delete a task                            |
+| GET    | `/organizations/{orgID}/tasks/{taskID}/activity`              | `tasks.read`    | Read task activity                       |
+| GET    | `/organizations/{orgID}/projects/{projectID}/tasks`           | `tasks.read`    | List the tasks of one project            |
+| POST   | `/organizations/{orgID}/projects/{projectID}/tasks`           | `tasks.create`  | Create a task in a project               |
+
+Task list query parameters are `page`, `page_size` (maximum 100), `project_id`,
+`status`, `priority`, `assignee_id`, `unassigned`, `sort`, and `order`. Valid
+statuses are `todo`, `in_progress`, `blocked`, `in_review`, `done`, and
+`cancelled`; supported sorts are `created_at`, `updated_at`, `title`,
+`due_date`, `priority`, and `status`. `assignee_id` and `unassigned` cannot be
+combined. An assignee must be an active member of the same organization;
+removing a membership unassigns its tasks, and deleting a project deletes its
+tasks.
+
 The active tenant is derived server-side by verifying the authenticated user has
 an **active membership** in the requested organization; it is never taken from a
 client-supplied header. Unknown or cross-tenant organizations return **404**
@@ -303,7 +335,7 @@ roadmap.
 - [x] **Phase 4 — RBAC:** permissions, custom role management, and member role assignment
 - [x] Phase 5 — Teams: organization-scoped teams, team memberships, and authorization
 - [x] Phase 6 — Projects: filtering, sorting, pagination, authorization, and activity logging
-- [ ] Phase 7 — Tasks
+- [x] Phase 7 — Tasks: assignment, statuses, priorities, due dates, and task activity
 - [ ] Phase 8 — Invitations
 - [ ] Phase 9 — API keys
 - [ ] Phase 10 — Background jobs

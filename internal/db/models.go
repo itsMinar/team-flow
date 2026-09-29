@@ -91,6 +91,21 @@ type RolePermission struct {
 	PermissionID uuid.UUID
 }
 
+type Task struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	ProjectID      uuid.UUID
+	Title          string
+	Description    *string
+	Status         string
+	Priority       string
+	AssigneeID     *uuid.UUID
+	DueDate        *time.Time
+	CreatedBy      uuid.UUID
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type Team struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

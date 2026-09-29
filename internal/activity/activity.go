@@ -15,10 +15,15 @@ import (
 
 const (
 	ResourceProject = "project"
+	ResourceTask    = "task"
 
 	ProjectCreated = "project.created"
 	ProjectUpdated = "project.updated"
 	ProjectDeleted = "project.deleted"
+
+	TaskCreated = "task.created"
+	TaskUpdated = "task.updated"
+	TaskDeleted = "task.deleted"
 )
 
 type Entry struct {

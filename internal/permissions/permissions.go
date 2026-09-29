@@ -15,9 +15,13 @@ const (
 	ProjectsCreate      = "projects.create"
 	ProjectsUpdate      = "projects.update"
 	ProjectsDelete      = "projects.delete"
+	TasksRead           = "tasks.read"
+	TasksCreate         = "tasks.create"
+	TasksUpdate         = "tasks.update"
+	TasksDelete         = "tasks.delete"
 )
 
-var readOnly = []string{OrganizationsRead, MembersRead, RolesRead, TeamsRead, ProjectsRead}
+var readOnly = []string{OrganizationsRead, MembersRead, RolesRead, TeamsRead, ProjectsRead, TasksRead}
 
 // All returns every permission key, in a stable order.
 func All() []string {
@@ -27,6 +31,7 @@ func All() []string {
 		RolesRead, RolesManage,
 		TeamsRead, TeamsManage,
 		ProjectsRead, ProjectsCreate, ProjectsUpdate, ProjectsDelete,
+		TasksRead, TasksCreate, TasksUpdate, TasksDelete,
 	}
 }
 
@@ -37,7 +42,10 @@ func DefaultForRole(roleName string) []string {
 	case "Owner", "Admin":
 		return All()
 	case "Manager":
-		return append(append([]string{}, readOnly...), ProjectsCreate, ProjectsUpdate)
+		return append(append([]string{}, readOnly...),
+			ProjectsCreate, ProjectsUpdate,
+			TasksCreate, TasksUpdate,
+		)
 	default:
 		return append([]string{}, readOnly...)
 	}

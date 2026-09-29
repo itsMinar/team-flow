@@ -6,7 +6,7 @@ This document explains what TeamFlow can do today, how its parts fit together, h
 
 TeamFlow is a Go backend for a multi-tenant team and project-management SaaS product. It is designed for multiple organizations to share one deployment and database while keeping organization data isolated.
 
-The project is currently an API foundation with six completed phases:
+The project is currently an API foundation with seven completed phases:
 
 1. Foundation and infrastructure
 2. Authentication and session security
@@ -14,13 +14,14 @@ The project is currently an API foundation with six completed phases:
 4. Permission-based role management
 5. Teams and team memberships
 6. Projects, pagination, filtering, sorting, authorization, and activity
+7. Tasks, assignment, statuses, priorities, due dates, and task activity
 
 The codebase is a modular monolith. It has one repository and two executable processes:
 
 - `cmd/api`: HTTP API server
 - `cmd/worker`: background-worker process scaffold
 
-The current release is useful for building and testing secure SaaS foundations. It can create users and organizations, authenticate users, manage memberships, enforce tenant boundaries, and manage organization teams and projects. Tasks remain planned.
+The current release is useful for building and testing secure SaaS foundations. It can create users and organizations, authenticate users, manage memberships, enforce tenant boundaries, and manage organization teams, projects, and tasks.
 
 ## 2. What You Can Do Today
 
@@ -77,6 +78,20 @@ The current release is useful for building and testing secure SaaS foundations. 
 - Record project creation, update, and deletion activity transactionally.
 - Enforce `projects.read`, `projects.create`, `projects.update`, and
   `projects.delete` in the service layer.
+
+### Tasks
+
+- Create, read, update, and delete tasks inside a project of the organization.
+- Assign a task to any active member of the organization, or leave it unassigned.
+- Track status, priority, due date, and description per task.
+- Filter by project, status, priority, assignee, or unassigned work.
+- Sort by an approved field and page through task collections.
+- Record task creation, update, assignment, and deletion activity transactionally.
+- Enforce `tasks.read`, `tasks.create`, `tasks.update`, and `tasks.delete` in
+  the service layer.
+- Unassign a task automatically when its assignee loses the membership.
+- Delete a task when its project is deleted, and keep tasks tenant-isolated with
+  composite foreign keys and Row Level Security.
 
 ### Operations and reliability
 
@@ -228,6 +243,53 @@ Project list query parameters are `page`, `page_size` (maximum 100), `status`,
 `priority`, `team_id`, `sort`, and `order`. Supported sorts are `created_at`,
 `updated_at`, `name`, `due_date`, and `priority`.
 
+### Task endpoints
+
+| Method   | Path                                                         | Authorization  | Description                                    |
+| -------- | ------------------------------------------------------------ | -------------- | ---------------------------------------------- |
+| `GET`    | `/organizations/{orgID}/tasks`                                | `tasks.read`   | Lists tasks in the organization.               |
+| `GET`    | `/organizations/{orgID}/tasks/{taskID}`                       | `tasks.read`   | Reads a task.                                  |
+| `PATCH`  | `/organizations/{orgID}/tasks/{taskID}`                       | `tasks.update` | Updates a task, including assignment.          |
+| `DELETE` | `/organizations/{orgID}/tasks/{taskID}`                       | `tasks.delete` | Deletes a task.                                |
+| `GET`    | `/organizations/{orgID}/tasks/{taskID}/activity`              | `tasks.read`   | Lists task activity.                           |
+| `GET`    | `/organizations/{orgID}/projects/{projectID}/tasks`           | `tasks.read`   | Lists the tasks of one project.                |
+| `POST`   | `/organizations/{orgID}/projects/{projectID}/tasks`           | `tasks.create` | Creates a task in a project.                   |
+
+Task list query parameters are `page`, `page_size` (maximum 100), `project_id`,
+`status`, `priority`, `assignee_id`, `unassigned`, `sort`, and `order`. Valid
+statuses are `todo`, `in_progress`, `blocked`, `in_review`, `done`, and
+`cancelled`; supported sorts are `created_at`, `updated_at`, `title`,
+`due_date`, `priority`, and `status`. `assignee_id` and `unassigned` cannot be
+combined in one request.
+
+Task create requests use this shape:
+
+```json
+{
+  "title": "Ship the billing page",
+  "description": "Behind the feature flag",
+  "status": "in_progress",
+  "priority": "high",
+  "assignee_id": "9f0f0b0e-2a51-4f5c-9f0b-2a514f5c9f0b",
+  "due_date": "2026-12-24"
+}
+```
+
+`status` and `priority` default to `todo` and `medium`. `assignee_id` must be
+an active member of the same organization; sending `null` unassigns the task.
+
+```bash
+curl -sS -X POST "http://localhost:8080/api/v1/organizations/$ORG_ID/projects/$PROJECT_ID/tasks" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Ship the billing page","priority":"high","due_date":"2026-12-24"}'
+```
+
+```bash
+curl -sS "http://localhost:8080/api/v1/organizations/$ORG_ID/tasks?assignee_id=$USER_ID&sort=due_date" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
 #### Create an organization
 
 ```bash
@@ -257,10 +319,13 @@ Role create and update requests use this shape:
 ```
 
 The built-in permissions are `organizations.read`, `organizations.update`,
-`members.read`, `members.manage`, `roles.read`, and `roles.manage`. Owner and
-Admin receive all permissions by default. Manager, Member, and Viewer receive
-read permissions. System roles are immutable, and a role with assigned members
-cannot be deleted.
+`members.read`, `members.manage`, `roles.read`, `roles.manage`, `teams.read`,
+`teams.manage`, `projects.read`, `projects.create`, `projects.update`,
+`projects.delete`, `tasks.read`, `tasks.create`, `tasks.update`, and
+`tasks.delete`. Owner and Admin receive all sixteen by default. Manager, Member,
+and Viewer receive read permissions, and Manager can additionally create and
+update projects and tasks. System roles are immutable, and a role with assigned
+members cannot be deleted.
 
 ## 4. Architecture
 
@@ -301,11 +366,13 @@ Handlers decode requests and write responses. Services contain business rules an
 | `internal/database`      | PostgreSQL pool creation and database health checks.                              |
 | `internal/db`            | SQLC-generated queries, models, and database interfaces.                          |
 | `internal/health`        | Liveness and readiness handlers.                                                  |
+| `internal/fieldtypes`   | Shared calendar-date and partial-update field types.                              |
 | `internal/httpx`         | JSON envelopes, decoding, typed errors, and client-safe error mapping.            |
 | `internal/middleware`    | Shared HTTP middleware.                                                           |
 | `internal/observability` | Structured logging and request ID support.                                        |
 | `internal/organizations` | Organization services, handlers, routes, and tenant resolution.                   |
 | `internal/teams`         | Team services, handlers, routes, authorization, and team memberships.             |
+| `internal/tasks`         | Task services, handlers, routes, assignment, filtering, and task activity.       |
 | `internal/validation`    | Reusable request validation.                                                      |
 
 ## 5. Repository Layout
@@ -327,7 +394,11 @@ internal/
   httpx/                   HTTP response and error helpers
   middleware/              Shared HTTP middleware
   observability/            JSON logging and request IDs
+  fieldtypes/               Shared calendar-date and partial-update types
   organizations/            Organization and tenant logic
+  permissions/              Permission keys and default role grants
+  projects/                 Project and project-activity logic
+  tasks/                    Task, assignment, and task-activity logic
   teams/                    Team and team-membership logic
   validation/              Request validation
 
@@ -484,6 +555,8 @@ The current migrations cover:
 - Permissions and role-permission assignments for RBAC
 - Teams and team memberships with composite organization constraints and RLS
 - Projects, project activity, filtering, sorting, pagination, and RLS
+- Tasks, assignment to active organization members, composite project and
+  membership foreign keys, indexes, and RLS
 
 ### How tenant access works
 
@@ -544,6 +617,9 @@ Organization creation is atomic: the organization, default roles, and Owner memb
   an active member of the same organization.
 - Projects require the appropriate project permission; optional teams must
   belong to the same organization and activity is append-only.
+- Tasks require the appropriate task permission; the project in the path must
+  belong to the same organization, and an assignee must be an active member of
+  it. Both invariants are also enforced by composite foreign keys.
 
 ## 10. Testing
 
@@ -663,7 +739,6 @@ The container API publishes port `8080`. Stop it before `make dev`, or set a dif
 
 The following capabilities are planned and should not be assumed to exist yet:
 
-- Tasks and task workflows
 - Invitations and email-based onboarding
 - API keys
 - Actual background-job processing
@@ -680,7 +755,7 @@ The planned roadmap is:
 4. RBAC - complete
 5. Teams - complete
 6. Projects - complete
-7. Tasks - planned
+7. Tasks - complete
 8. Invitations - planned
 9. API keys - planned
 10. Background jobs - planned
@@ -696,7 +771,7 @@ Architecture decisions and the reasoning behind major security and infrastructur
 A practical order for continuing the project is:
 
 1. Add membership management: invite, activate, suspend, and remove members.
-2. Add tasks, statuses, assignments, and due dates.
+2. Add comments, task watchers, and task labels on top of the task model.
 3. Add background jobs for invitations, notifications, and other asynchronous work.
 4. Add rate limiting and audit events before exposing the API publicly.
 5. Expand OpenAPI or Postman documentation as each endpoint is added.

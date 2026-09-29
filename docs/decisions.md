@@ -2,6 +2,54 @@
 
 Short records of notable engineering decisions. Newest first within each phase.
 
+## Phase 7 — Tasks
+
+### Tasks are organization-scoped and reached through their project
+
+Tasks carry `organization_id` and reference their project through a composite
+`(project_id, organization_id)` foreign key, mirroring the project/team
+invariant from Phase 6. Deleting a project cascades to its tasks, because a task
+without a project has no meaning, whereas a task only optionally has an
+assignee.
+
+The assignee is stored as `assignee_id` with a composite foreign key to
+`organization_memberships (user_id, organization_id)`. This makes two guarantees
+database-enforced rather than application-only: a task can never be assigned
+across tenants, and removing a membership (`ON DELETE SET NULL`) unassigns the
+member's tasks instead of deleting the work. The service additionally requires
+the membership status to be `active`, which a foreign key cannot express.
+
+The service pre-checks the project and the assignee and returns
+`PROJECT_NOT_FOUND` (404) and `INVALID_ASSIGNEE` (422) with safe messages;
+concurrent deletions that slip past those checks are mapped from the
+`23503` constraint names `tasks_project_fkey` and `tasks_assignee_fkey` to the
+same errors, so a race cannot surface a raw database error.
+
+### Two task collections, one filter
+
+Task lists are exposed both per project and per organization. Both call the same
+service method with the same filter type; the per-project route overwrites
+`project_id` from the URL, so a query parameter can never widen a project's
+collection. Filters are status, priority, assignee, and unassigned; the two
+assignee filters are mutually exclusive and validated at the HTTP boundary.
+Sort keys are fixed SQL `CASE` branches guarded by a service allowlist, exactly
+as in Phase 6.
+
+`tasks.read`, `tasks.create`, `tasks.update`, and `tasks.delete` mirror the
+project permissions. Manager can create and update tasks but not delete them;
+Member and Viewer keep read-only access. Task writes record an append-only
+activity event in the same tenant transaction, recording status and assignee
+transitions as structured metadata.
+
+### Shared field types instead of per-resource copies
+
+`internal/fieldtypes` now owns the calendar-date and partial-update
+(`Optional[T]`) JSON types plus pointer helpers. Phase 6 had them in the
+`projects` package, and copying them into `tasks` would have duplicated the
+subtle omitted-versus-explicit-null semantics across resources. The `projects`
+package keeps `Date` and `Optional` as type aliases, so its API and tests are
+unchanged.
+
 ## Phase 6 — Projects
 
 ### Tenant-scoped projects with transactional activity

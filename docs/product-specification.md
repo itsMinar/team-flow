@@ -115,6 +115,26 @@ return typed domain errors which the HTTP layer maps to status codes.
 - Unit, integration, RLS, authorization, migration, formatting, static, and
   race checks pass before Phase 6 is marked complete.
 
+## Phase 7 Definition of Done
+
+- Tasks belong to one project of one organization and can only reference a
+  project from that organization.
+- Task fields include title, description, status, priority, optional assignee,
+  due date, creator, and timestamps with database constraints and indexes.
+- An assignee must be an active member of the same organization; removing a
+  membership unassigns its tasks and deleting a project deletes its tasks.
+- Task lists support bounded pagination, project, status, priority, assignee,
+  and unassigned filtering, and a whitelisted sort field and order.
+- `tasks.read`, `tasks.create`, `tasks.update`, and `tasks.delete` are resolved
+  from current organization RBAC state.
+- Task writes and activity records commit atomically in one tenant-scoped
+  transaction.
+- Task activity is append-only, tenant-isolated, paginated, and safe for
+  clients to read.
+- Cross-tenant resources return safe errors without leaking task data.
+- Unit, integration, HTTP, RLS, authorization, migration, formatting, static,
+  and race checks pass before Phase 7 is marked complete.
+
 ## Definition of Done for the Product
 
 The product is complete only when the API, worker, migrations, seed data,

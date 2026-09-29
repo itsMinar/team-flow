@@ -1,14 +1,13 @@
 package projects
 
 import (
-	"bytes"
-	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/itsMinar/team-flow/internal/db"
+	"github.com/itsMinar/team-flow/internal/fieldtypes"
 	"github.com/itsMinar/team-flow/internal/validation"
 )
 
@@ -20,7 +19,7 @@ const (
 	defaultPriority = "medium"
 	defaultSort     = "created_at"
 
-	dateLayout = "2006-01-02"
+	dateLayout = fieldtypes.DateLayout
 )
 
 var (
@@ -30,42 +29,10 @@ var (
 )
 
 // Date is a calendar date encoded as YYYY-MM-DD.
-type Date struct{ time.Time }
-
-func (d Date) MarshalJSON() ([]byte, error) { return json.Marshal(d.Format(dateLayout)) }
-
-func (d *Date) UnmarshalJSON(b []byte) error {
-	var s string
-	if err := json.Unmarshal(b, &s); err != nil {
-		return err
-	}
-	t, err := time.Parse(dateLayout, s)
-	if err != nil {
-		return err
-	}
-	d.Time = t
-	return nil
-}
+type Date = fieldtypes.Date
 
 // Optional distinguishes an omitted JSON field (Set=false) from an explicit null (Set=true, Value=nil).
-type Optional[T any] struct {
-	Set   bool
-	Value *T
-}
-
-func (o *Optional[T]) UnmarshalJSON(b []byte) error {
-	o.Set = true
-	if bytes.Equal(bytes.TrimSpace(b), []byte("null")) {
-		o.Value = nil
-		return nil
-	}
-	var v T
-	if err := json.Unmarshal(b, &v); err != nil {
-		return err
-	}
-	o.Value = &v
-	return nil
-}
+type Optional[T any] = fieldtypes.Optional[T]
 
 type CreateInput struct {
 	Name        string     `json:"name"`
@@ -218,31 +185,19 @@ func toDTO(p db.Project) ProjectDTO {
 }
 
 func normalizeDescription(s *string) *string {
-	if s == nil || strings.TrimSpace(*s) == "" {
-		return nil
-	}
-	return s
+	return fieldtypes.NormalizeOptionalText(s)
 }
 
 func dateFromTime(t *time.Time) *Date {
-	if t == nil {
-		return nil
-	}
-	return &Date{Time: *t}
+	return fieldtypes.DateFromTime(t)
 }
 
 func timeFromDate(d *Date) *time.Time {
-	if d == nil {
-		return nil
-	}
-	return &d.Time
+	return fieldtypes.TimeFromDate(d)
 }
 
-func equalDate(a, b Date) bool { return a.Equal(b.Time) }
+func equalDate(a, b Date) bool { return fieldtypes.EqualDate(a, b) }
 
 func equalPtr[T any](a, b *T, eq func(T, T) bool) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return eq(*a, *b)
+	return fieldtypes.EqualPtr(a, b, eq)
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/itsMinar/team-flow/internal/health"
 	"github.com/itsMinar/team-flow/internal/organizations"
 	"github.com/itsMinar/team-flow/internal/projects"
+	"github.com/itsMinar/team-flow/internal/tasks"
 	"github.com/itsMinar/team-flow/internal/teams"
 )
 
@@ -91,6 +92,7 @@ func TestRouter_TenantModulesRequireAuth(t *testing.T) {
 		OrgMW:        organizations.NewMiddleware(nil, logger),
 		TeamsHandler: teams.NewHandler(nil, logger),
 		Projects:     projects.NewHandler(nil, logger),
+		Tasks:        tasks.NewHandler(nil, logger),
 	})
 	orgID := uuid.NewString()
 	for _, path := range []string{
@@ -99,6 +101,10 @@ func TestRouter_TenantModulesRequireAuth(t *testing.T) {
 		"/api/v1/organizations/" + orgID + "/projects",
 		"/api/v1/organizations/" + orgID + "/projects/" + uuid.NewString(),
 		"/api/v1/organizations/" + orgID + "/projects/" + uuid.NewString() + "/activity",
+		"/api/v1/organizations/" + orgID + "/tasks",
+		"/api/v1/organizations/" + orgID + "/tasks/" + uuid.NewString(),
+		"/api/v1/organizations/" + orgID + "/tasks/" + uuid.NewString() + "/activity",
+		"/api/v1/organizations/" + orgID + "/projects/" + uuid.NewString() + "/tasks",
 	} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

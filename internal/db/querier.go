@@ -17,17 +17,20 @@ type Querier interface {
 	CountActivityByResource(ctx context.Context, arg CountActivityByResourceParams) (int64, error)
 	CountMembershipsByRole(ctx context.Context, arg CountMembershipsByRoleParams) (int64, error)
 	CountProjects(ctx context.Context, arg CountProjectsParams) (int64, error)
+	CountTasks(ctx context.Context, arg CountTasksParams) (int64, error)
 	CreateActivityLog(ctx context.Context, arg CreateActivityLogParams) error
 	CreateMembership(ctx context.Context, arg CreateMembershipParams) (OrganizationMembership, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
+	CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error)
 	CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteExpiredRefreshTokens(ctx context.Context) error
 	DeleteProject(ctx context.Context, arg DeleteProjectParams) error
 	DeleteRole(ctx context.Context, arg DeleteRoleParams) error
+	DeleteTask(ctx context.Context, arg DeleteTaskParams) error
 	DeleteTeam(ctx context.Context, arg DeleteTeamParams) error
 	GetMembership(ctx context.Context, arg GetMembershipParams) (OrganizationMembership, error)
 	GetMembershipByID(ctx context.Context, arg GetMembershipByIDParams) (OrganizationMembership, error)
@@ -40,6 +43,8 @@ type Querier interface {
 	GetRefreshTokenByHashForUpdate(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetRoleByID(ctx context.Context, arg GetRoleByIDParams) (Role, error)
 	GetRoleByName(ctx context.Context, arg GetRoleByNameParams) (Role, error)
+	GetTask(ctx context.Context, arg GetTaskParams) (Task, error)
+	GetTaskForUpdate(ctx context.Context, arg GetTaskForUpdateParams) (Task, error)
 	GetTeam(ctx context.Context, arg GetTeamParams) (Team, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
@@ -51,6 +56,8 @@ type Querier interface {
 	// Sort keys are fixed CASE branches, so client input never becomes SQL.
 	ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error)
 	ListRolesByOrganization(ctx context.Context, organizationID uuid.UUID) ([]Role, error)
+	// Sort keys are fixed CASE branches, so client input never becomes SQL.
+	ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, error)
 	ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]ListTeamMembersRow, error)
 	ListTeams(ctx context.Context, organizationID uuid.UUID) ([]Team, error)
 	OrganizationSlugExists(ctx context.Context, slug string) (bool, error)
@@ -62,6 +69,7 @@ type Querier interface {
 	UpdateMembershipRole(ctx context.Context, arg UpdateMembershipRoleParams) (OrganizationMembership, error)
 	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
 	UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error)
+	UpdateTask(ctx context.Context, arg UpdateTaskParams) (Task, error)
 	UpdateTeam(ctx context.Context, arg UpdateTeamParams) (Team, error)
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error
 }
