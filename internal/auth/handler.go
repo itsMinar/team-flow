@@ -1,9 +1,7 @@
 package auth
 
 import (
-	"net"
 	"net/http"
-	"strings"
 
 	"log/slog"
 
@@ -209,24 +207,6 @@ func requestMeta(r *http.Request) RequestMeta {
 func RequestMetaFromRequest(r *http.Request) RequestMeta {
 	return RequestMeta{
 		UserAgent: r.UserAgent(),
-		IPAddress: clientIP(r),
+		IPAddress: httpx.ClientIP(r),
 	}
-}
-
-// clientIP extracts a bare IP address (no port) suitable for storage in an
-// inet column, preferring the first X-Forwarded-For entry when present.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		first := strings.TrimSpace(strings.Split(xff, ",")[0])
-		if net.ParseIP(first) != nil {
-			return first
-		}
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	if net.ParseIP(r.RemoteAddr) != nil {
-		return r.RemoteAddr
-	}
-	return ""
 }

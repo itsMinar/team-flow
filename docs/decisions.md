@@ -2,6 +2,74 @@
 
 Short records of notable engineering decisions. Newest first within each phase.
 
+## Phase 11 — Rate limiting
+
+### Token buckets evaluated in Redis, not counted in the application
+
+Each policy is a token bucket whose refill rate is derived from a limit and a
+period, evaluated by a Lua script so the refill and the consumption happen in one
+atomic step. The algorithm matters less than that atomicity: with a GET followed
+by a SET, a burst of concurrent requests would all read the same balance and all
+succeed, which is exactly the burst a limiter exists to stop. The concurrency test
+asserts that N simultaneous requests yield exactly the configured number of
+allowances.
+
+A sliding window or a fixed counter would also work, but the bucket needs one key
+per caller and no per-request bookkeeping, which matters when the key space is
+every user id and every API key.
+
+### Three budgets, keyed by who the caller actually is
+
+The unauthenticated surface is keyed by client IP, session traffic by user, and
+machine traffic by API key. The router applies them in one place, after
+authentication, which has two consequences worth stating.
+
+First, a leaked API key cannot exhaust a person's session budget, and a chatty
+browser session cannot starve an integration. Sharing one budget across credential
+types would let either one degrade the other.
+
+Second, limiting is mounted centrally rather than inside each feature module, so a
+new module is covered by default instead of depending on its author remembering
+to add a limiter. Making `auth.Middleware.RequireAuth` idempotent is what allows
+this: the router authenticates once at the top of the group, mounts the limiter
+after it, and feature routers that still call `RequireAuth` themselves become
+no-ops instead of parsing the token twice.
+
+Because the limiter runs after authentication, a request rejected for a missing
+credential never consumes anyone's budget.
+
+### Identifiers are hashed into the key
+
+A bucket key contains a truncated SHA-256 of the caller, not the caller. Key
+names are readable by anyone with Redis access, and a user id or an address in
+plaintext there is a small, permanent leak of identifiers into backup dumps and
+monitoring output. The policy name stays readable on purpose, so an operator can
+tell which budget a key belongs to.
+
+### Fail open, loudly
+
+When the limiter is unreachable the request is allowed through by default and the
+failure is logged with the policy and request id. Turning a Redis hiccup into a
+total API outage is a worse outcome than briefly unenforced limits, and Redis is
+already a readiness dependency, so an operator sees the outage through `/ready`
+rather than through failed logins. `RATE_LIMIT_FAIL_OPEN=false` reverses the
+decision for deployments that would rather reject than serve unenforced traffic.
+
+Enabling is also environment dependent: on by default when `APP_ENV=production`,
+off elsewhere, so a developer is not throttled by the shipping defaults while a
+deployment is protected without anyone having to remember a flag.
+
+### One client address, one implementation
+
+Keying an IP limit off an unvalidated `X-Forwarded-For` is a classic bypass: a
+caller sets the header and gets a fresh bucket per request. The project already
+had two private copies of `clientIP`, and they disagreed — one forwarded the raw
+comma-separated header, the other returned the address with its port, which would
+have made every bucket key slightly different per connection. Both now delegate to
+`httpx.ClientIP`, which parses the first forwarded entry and strips the port. It
+is still only trustworthy when the edge strips client-supplied forwarding headers,
+which is called out on the function.
+
 ## Phase 10 — Background jobs
 
 ### Redis Streams with a consumer group, not a list

@@ -27,9 +27,17 @@ import (
 	"github.com/itsMinar/team-flow/internal/observability"
 	"github.com/itsMinar/team-flow/internal/organizations"
 	"github.com/itsMinar/team-flow/internal/projects"
+	"github.com/itsMinar/team-flow/internal/ratelimit"
 	"github.com/itsMinar/team-flow/internal/tasks"
 	"github.com/itsMinar/team-flow/internal/teams"
 )
+
+// rateLimitPolicy builds a limiter policy from its configuration. The name is
+// part of the Redis key, so it is fixed rather than derived from the limit: raising
+// a limit must not reset every caller's bucket.
+func rateLimitPolicy(name string, cfg config.RateLimitPolicyConfig) ratelimit.Policy {
+	return ratelimit.Policy{Name: name, Limit: cfg.Limit, Period: cfg.Period}
+}
 
 // jobEncryptionKey returns the key protecting job payloads at rest in Redis.
 // JOB_ENCRYPTION_KEY is preferred; when it is absent the key is derived from the
@@ -128,6 +136,24 @@ func run() error {
 	// and API keys; every handler receives it when routes are registered.
 	authMW := auth.NewMiddleware(jwtService, logger).WithAPIKeys(apiKeyService)
 
+	// Rate limits live in Redis, so limiting shares the readiness dependency and a
+	// Redis outage cannot silently disable protection: it is logged and, by
+	// default, allowed through.
+	rateLimitMW := ratelimit.NopMiddleware(logger)
+	if cfg.RateLimit.Enabled {
+		limiter, err := ratelimit.NewRedisLimiter(redisClient.Client)
+		if err != nil {
+			return fmt.Errorf("build rate limiter: %w", err)
+		}
+		rateLimitMW = ratelimit.NewMiddleware(limiter, logger, cfg.RateLimit.FailOpen)
+		logger.Info("rate limiting enabled",
+			slog.String("auth", fmt.Sprintf("%d/%s", cfg.RateLimit.Auth.Limit, cfg.RateLimit.Auth.Period)),
+			slog.String("user", fmt.Sprintf("%d/%s", cfg.RateLimit.User.Limit, cfg.RateLimit.User.Period)),
+			slog.String("api_key", fmt.Sprintf("%d/%s", cfg.RateLimit.APIKey.Limit, cfg.RateLimit.APIKey.Period)),
+			slog.Bool("fail_open", cfg.RateLimit.FailOpen),
+		)
+	}
+
 	router := api.NewRouter(api.Dependencies{
 		Config:       cfg,
 		Logger:       logger,
@@ -141,6 +167,12 @@ func run() error {
 		Tasks:        taskHandler,
 		Invitations:  invitationHandler,
 		APIKeys:      apiKeyHandler,
+		RateLimit:    rateLimitMW,
+		RateLimits: ratelimit.Policies{
+			Auth:   rateLimitPolicy("auth", cfg.RateLimit.Auth),
+			User:   rateLimitPolicy("user", cfg.RateLimit.User),
+			APIKey: rateLimitPolicy("api_key", cfg.RateLimit.APIKey),
+		},
 	})
 
 	srv := &http.Server{

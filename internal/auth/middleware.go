@@ -51,8 +51,17 @@ func (m *Middleware) WithAPIKeys(authenticator APIKeyAuthenticator) *Middleware 
 // principal in the request context. A bearer access token is accepted first,
 // then an API key. Requests without a usable credential are rejected with 401
 // before reaching the handler.
+//
+// The middleware is idempotent: when a principal is already in the context the
+// request passes straight through. That lets the router authenticate once at the
+// top of a route group, mount per-caller concerns such as rate limiting after it,
+// and still let individual feature routers apply RequireAuth themselves.
 func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, already := authctx.PrincipalFromContext(r.Context()); already {
+			next.ServeHTTP(w, r)
+			return
+		}
 		principal, ok := m.resolve(r)
 		if !ok {
 			httpx.WriteError(w, r, m.logger, httpx.ErrUnauthorized)

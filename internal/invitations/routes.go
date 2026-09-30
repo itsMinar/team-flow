@@ -6,12 +6,8 @@ import (
 	"github.com/itsMinar/team-flow/internal/auth"
 )
 
-// RegisterRoutes mounts the invitation endpoints.
-//
-// Management endpoints are organization-scoped and require an access token with
-// members.manage. The accept flow is public because the invitation token is
-// itself the credential; OptionalAuth lets an existing member redeem it with
-// their current session while someone without an account creates one.
+// RegisterRoutes mounts the organization-scoped invitation endpoints. Managing
+// invitations requires an access token with members.manage.
 func (h *Handler) RegisterRoutes(r chi.Router, authMW *auth.Middleware) {
 	r.Route("/organizations/{orgID}/invitations", func(r chi.Router) {
 		r.Use(authMW.RequireAuth)
@@ -20,7 +16,15 @@ func (h *Handler) RegisterRoutes(r chi.Router, authMW *auth.Middleware) {
 		r.Post("/{invitationID}/resend", h.Resend)
 		r.Post("/{invitationID}/revoke", h.Revoke)
 	})
+}
 
+// RegisterPublicRoutes mounts the accept flow.
+//
+// It is public because the invitation token is itself the credential.
+// OptionalAuth lets an existing member redeem it with their current session while
+// someone without an account creates one, so this must be mounted outside the
+// authenticated and per-user rate limited group.
+func (h *Handler) RegisterPublicRoutes(r chi.Router, authMW *auth.Middleware) {
 	r.Route("/invitations", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(authMW.OptionalAuth)

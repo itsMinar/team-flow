@@ -198,6 +198,23 @@ return typed domain errors which the HTTP layer maps to status codes.
 - Unit, integration, HTTP, migration, formatting, static, and race checks pass
   before Phase 10 is marked complete.
 
+## Phase 11 Definition of Done
+
+- Unauthenticated endpoints are limited by client IP, session traffic by user, and
+  API key traffic by key, each with its own budget.
+- Limits are token buckets evaluated atomically in Redis, so concurrent requests
+  cannot overspend a budget.
+- Every limited response reports the limit, remaining budget, and reset time; a
+  rejection returns HTTP 429 with `Retry-After` and a stable error code.
+- Bucket keys are derived from a hash, so no user identifier or address is stored
+  in Redis in the clear.
+- Limiting is enabled by default in production and configurable, and an
+  unreachable limiter fails open by default while remaining observable.
+- Limits are applied centrally so a new feature module is covered by default, and
+  requests rejected before authentication consume no budget.
+- Unit, integration, HTTP, formatting, static, and race checks pass before Phase 11
+  is marked complete.
+
 ## Definition of Done for the Product
 
 The product is complete only when the API, worker, migrations, seed data,

@@ -6,7 +6,7 @@ This document explains what TeamFlow can do today, how its parts fit together, h
 
 TeamFlow is a Go backend for a multi-tenant team and project-management SaaS product. It is designed for multiple organizations to share one deployment and database while keeping organization data isolated.
 
-The project is currently an API foundation with ten completed phases:
+The project is currently an API foundation with eleven completed phases:
 
 1. Foundation and infrastructure
 2. Authentication and session security
@@ -18,6 +18,7 @@ The project is currently an API foundation with ten completed phases:
 8. Invitations, hashed single-use tokens, expiration, acceptance, and email
 9. API keys, one-time display, hashing, authentication, expiration, and revocation
 10. Background jobs: Redis queue, worker pool, retries, backoff, dead letters
+11. Rate limiting: Redis token buckets for authentication, users, and API keys
 
 The codebase is a modular monolith. It has one repository and two executable processes:
 
@@ -28,7 +29,8 @@ The current release is useful for building and testing secure SaaS foundations. 
 and manage organization teams, projects, and tasks. Organization invitations let
 new people join an existing organization with a chosen role, API keys let
 automation call the API on behalf of one user in one organization, and
-asynchronous work runs in a separate worker process.
+asynchronous work runs in a separate worker process, and requests are rate
+limited per caller.
 
 ## 2. What You Can Do Today
 
@@ -135,6 +137,20 @@ asynchronous work runs in a separate worker process.
 - Revoke a key immediately and hide revoked keys from listings by default.
 - Record last usage, at most once a minute per key.
 - Reject invalid, expired, and revoked keys identically.
+
+### Rate limiting
+
+- Limit unauthenticated endpoints by client IP, session traffic by user, and API
+  key traffic by key, each with its own budget.
+- Evaluate a token bucket atomically in Redis so concurrent requests cannot
+  overspend a limit.
+- Return `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`
+  on every limited response, plus `Retry-After` and a `RATE_LIMITED` error on
+  rejection.
+- Key buckets by a hash, so no user id or address appears in a Redis key.
+- Enable limiting by default in production and off elsewhere, and fail open when
+  the limiter is unreachable so a Redis outage is not an API outage.
+- Apply limits centrally in the router so new feature modules are covered.
 
 ### Background jobs
 
@@ -582,6 +598,7 @@ internal/
   organizations/            Organization and tenant logic
   permissions/              Permission keys and default role grants
   projects/                 Project and project-activity logic
+  ratelimit/                Rate limiting and its middleware
   tasks/                    Task, assignment, and task-activity logic
   teams/                    Team and team-membership logic
   validation/              Request validation
@@ -718,6 +735,14 @@ Configuration is loaded from environment variables at startup. Invalid configura
 | `JWT_ISSUER`                  | `teamflow`    | JWT issuer claim.                                                     |
 | `JWT_ACCESS_TTL`              | `15m`         | Access-token lifetime.                                                |
 | `JWT_REFRESH_TTL`             | `720h`        | Refresh-token lifetime and must exceed access TTL.                    |
+| `RATE_LIMIT_ENABLED`          | `production` | Rate limiting on; defaults to enabled in production only.  |
+| `RATE_LIMIT_FAIL_OPEN`        | `true`       | Allow requests when the limiter is unreachable.           |
+| `RATE_LIMIT_AUTH_LIMIT`       | `10`         | Unauthenticated requests per period, keyed by IP.          |
+| `RATE_LIMIT_AUTH_PERIOD`      | `1m`         | Period for the authentication limit.                      |
+| `RATE_LIMIT_USER_LIMIT`       | `300`        | Session requests per period, keyed by user.                |
+| `RATE_LIMIT_USER_PERIOD`      | `1m`         | Period for the user limit.                                 |
+| `RATE_LIMIT_API_KEY_LIMIT`    | `600`        | API key requests per period, keyed by key.                 |
+| `RATE_LIMIT_API_KEY_PERIOD`   | `1m`         | Period for the API key limit.                              |
 | `API_KEY_DEFAULT_TTL`         | `2160h`      | API key lifetime when a request does not specify one.     |
 | `API_KEY_MAX_TTL`             | `8760h`      | Maximum API key lifetime; keys never outlive this bound.   |
 | `WORKER_CONCURRENCY`         | `4`         | Size of the background worker pool.                        |
@@ -822,6 +847,19 @@ Organization creation is atomic: the organization, default roles, and Owner memb
 - A revoked-token reuse attempt revokes the whole token family.
 - Logout revokes refresh sessions but does not invalidate already-issued access tokens; those remain valid until expiry.
 
+### Rate limiting
+
+- The unauthenticated surface is limited by client IP, and tenant traffic is
+  limited by user or by API key after authentication, so a leaked key cannot spend
+  a person's budget.
+- Limits are token buckets with exponential-free, linear refill, evaluated inside
+  Redis with a Lua script for atomicity.
+- Enabling rate limiting does not change the readiness contract: Redis is already
+  a readiness dependency, so an unreachable limiter is an outage of a component
+  the API already reports.
+- Rejections use HTTP 429 with a stable `RATE_LIMITED` code, so clients can back
+  off on the error code as well as on `Retry-After`.
+
 ### HTTP protections
 
 - Panic recovery prevents a handler panic from crashing the server.
@@ -896,12 +934,13 @@ The test suite covers configuration validation, middleware, health checks, HTTP 
 
 ```bash
 export TEST_REDIS_URL='redis://localhost:6379/15'
-go test -race -count=1 ./internal/jobs
+go test -race -count=1 ./internal/jobs ./internal/ratelimit
 unset TEST_REDIS_URL
 ```
 
 Queue tests are skipped when `TEST_REDIS_URL` is unset. They delete only the
-`teamflow:jobs:*` keys, so a development Redis can be used.
+`teamflow:jobs:*` and `teamflow:ratelimit:*` keys, so a development Redis can be
+used.
 
 ### Database integration tests
 
@@ -1009,7 +1048,7 @@ The planned roadmap is:
 8. Invitations - complete
 9. API keys - complete
 10. Background jobs - complete
-11. Rate limiting - planned
+11. Rate limiting - complete
 12. Audit and observability - planned
 13. Testing expansion - planned
 14. Production hardening - planned
@@ -1024,7 +1063,7 @@ A practical order for continuing the project is:
 2. Add key rotation and per-key scopes, then comments, task watchers, and labels.
 3. Add a real email transport so the queued invitation mail leaves the process,
    and enqueue notifications and other asynchronous work on the same queue.
-4. Add rate limiting and audit events before exposing the API publicly.
+4. Add audit events and metrics before exposing the API publicly.
 5. Expand OpenAPI or Postman documentation as each endpoint is added.
 6. Add production deployment configuration, secret management, metrics, tracing, backups, and migration runbooks.
 

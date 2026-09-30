@@ -87,7 +87,7 @@ func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 				slog.Int("status", rec.status),
 				slog.Int("bytes", rec.bytes),
 				slog.Duration("duration", time.Since(start)),
-				slog.String("remote_addr", clientIP(r)),
+				slog.String("remote_addr", httpx.ClientIP(r)),
 			)
 		})
 	}
@@ -116,11 +116,4 @@ func MaxBodyBytes(limit int64) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-func clientIP(r *http.Request) string {
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		return fwd
-	}
-	return r.RemoteAddr
 }

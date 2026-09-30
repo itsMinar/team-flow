@@ -30,17 +30,18 @@ const (
 // environment variables and validated at startup so the process fails fast on
 // misconfiguration.
 type Config struct {
-	App      AppConfig
-	HTTP     HTTPConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	Log      LogConfig
-	JWT      JWTConfig
-	Invite   InvitationConfig
-	Mail     MailConfig
-	APIKey   APIKeyConfig
-	Worker   WorkerConfig
-	Jobs     JobsConfig
+	App       AppConfig
+	HTTP      HTTPConfig
+	Database  DatabaseConfig
+	Redis     RedisConfig
+	Log       LogConfig
+	JWT       JWTConfig
+	Invite    InvitationConfig
+	Mail      MailConfig
+	APIKey    APIKeyConfig
+	Worker    WorkerConfig
+	Jobs      JobsConfig
+	RateLimit RateLimitConfig
 }
 
 // AppConfig holds general application settings.
@@ -121,6 +122,29 @@ type JobsConfig struct {
 	EncryptionKey  string
 }
 
+// RateLimitPolicyConfig is a limit per period, configured from the environment.
+type RateLimitPolicyConfig struct {
+	Limit  int
+	Period time.Duration
+}
+
+// RateLimitConfig holds the request rate limits. Each surface gets its own policy
+// so machine traffic cannot consume a person's budget, and vice versa.
+type RateLimitConfig struct {
+	// Enabled turns limiting on. It defaults to on in production and off
+	// elsewhere, so a local checkout is not throttled while a deployment is
+	// protected by default.
+	Enabled bool
+	// FailOpen allows requests through when the limiter is unreachable.
+	FailOpen bool
+	// Auth applies to unauthenticated endpoints, keyed by client IP.
+	Auth RateLimitPolicyConfig
+	// User applies to session traffic, keyed by user.
+	User RateLimitPolicyConfig
+	// APIKey applies to machine traffic, keyed by API key.
+	APIKey RateLimitPolicyConfig
+}
+
 // Mail transports. The log transport writes invitation links to the
 // application log, which is only acceptable outside production.
 const (
@@ -192,11 +216,30 @@ func Load() (*Config, error) {
 			RetryMaxDelay:  getEnvDuration("WORKER_RETRY_MAX_DELAY", time.Hour),
 			EncryptionKey:  getEnv("JOB_ENCRYPTION_KEY", ""),
 		},
+		RateLimit: RateLimitConfig{
+			FailOpen: getEnvBool("RATE_LIMIT_FAIL_OPEN", true),
+			Auth: RateLimitPolicyConfig{
+				Limit:  getEnvInt("RATE_LIMIT_AUTH_LIMIT", 10),
+				Period: getEnvDuration("RATE_LIMIT_AUTH_PERIOD", time.Minute),
+			},
+			User: RateLimitPolicyConfig{
+				Limit:  getEnvInt("RATE_LIMIT_USER_LIMIT", 300),
+				Period: getEnvDuration("RATE_LIMIT_USER_PERIOD", time.Minute),
+			},
+			APIKey: RateLimitPolicyConfig{
+				Limit:  getEnvInt("RATE_LIMIT_API_KEY_LIMIT", 600),
+				Period: getEnvDuration("RATE_LIMIT_API_KEY_PERIOD", time.Minute),
+			},
+		},
 		Invite: InvitationConfig{
 			TTL:     getEnvDuration("INVITATION_TTL", 168*time.Hour),
 			BaseURL: strings.TrimRight(getEnv("INVITATION_BASE_URL", "http://localhost:3000"), "/"),
 		},
 	}
+
+	// Rate limiting is on by default in production and off elsewhere, so a local
+	// checkout is not throttled while a deployment is protected by default.
+	cfg.RateLimit.Enabled = getEnvBool("RATE_LIMIT_ENABLED", cfg.App.Env == EnvProduction)
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -251,6 +294,23 @@ func (c *Config) validate() error {
 	}
 	if err := validateAbsoluteURL("INVITATION_BASE_URL", c.Invite.BaseURL); err != nil {
 		problems = append(problems, err.Error())
+	}
+
+	for _, policy := range []struct {
+		label  string
+		limit  int
+		period time.Duration
+	}{
+		{"RATE_LIMIT_AUTH_LIMIT", c.RateLimit.Auth.Limit, c.RateLimit.Auth.Period},
+		{"RATE_LIMIT_USER_LIMIT", c.RateLimit.User.Limit, c.RateLimit.User.Period},
+		{"RATE_LIMIT_API_KEY_LIMIT", c.RateLimit.APIKey.Limit, c.RateLimit.APIKey.Period},
+	} {
+		if policy.limit < 1 {
+			problems = append(problems, policy.label+" must be at least 1")
+		}
+		if policy.period <= 0 {
+			problems = append(problems, "rate limit period for "+policy.label+" must be positive")
+		}
 	}
 
 	if c.Worker.Concurrency < 1 {
@@ -312,6 +372,15 @@ func validateAbsoluteURL(name, raw string) error {
 		return fmt.Errorf("%s must be an absolute http(s) URL", name)
 	}
 	return nil
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func getEnv(key, fallback string) string {

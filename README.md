@@ -6,8 +6,8 @@ infrastructure while their data stays strictly isolated.
 
 This repository is being built incrementally, phase by phase. **Phases 1
 (Foundation), 2 (Authentication), 3 (Multi-tenancy), 4 (RBAC), 5 (Teams), 6
-(Projects), 7 (Tasks), 8 (Invitations), 9 (API keys), and 10 (Background jobs)
-are complete.** See
+(Projects), 7 (Tasks), 8 (Invitations), 9 (API keys), 10 (Background jobs), and
+11 (Rate limiting) are complete.** See
 [Roadmap](#roadmap) for what is done and what comes next.
 
 ## Overview
@@ -69,6 +69,7 @@ internal/
   fieldtypes/  Shared calendar-date and partial-update field types
   health/      Liveness and readiness handlers
   jobs/        Redis job queue, worker pool, retries, dead letters
+  ratelimit/   Redis token-bucket limiter and its HTTP middleware
   httpx/       Response envelope + typed error mapping
   invitations/ Organization invitations, acceptance, and token lifecycle
   permissions/  Permission keys and default role grants
@@ -90,7 +91,7 @@ queries/       SQL source for sqlc
 | -------------------- | ------------------------------------------------------------------------------------- |
 | **Go**               | Fast, statically compiled, excellent concurrency for API + workers                    |
 | **PostgreSQL 16**    | Strong relational integrity, constraints, and Row Level Security for tenant isolation |
-| **Redis**            | Rate limiting, caching, and the background job queue                                  |
+| **Redis**            | Rate limiting and the background job queue                                            |
 | **pgx**              | High-performance PostgreSQL driver and pool (no ORM; explicit SQL)                    |
 | **chi**              | Lightweight, idiomatic `net/http` router                                              |
 | **slog**             | Structured JSON logging from the standard library                                     |
@@ -148,16 +149,16 @@ go test -race -count=1 ./...
 unset TEST_DATABASE_URL
 ```
 
-Queue tests need a Redis instance and are skipped without it:
+Queue and rate limiter tests need a Redis instance and are skipped without it:
 
 ```bash
 export TEST_REDIS_URL='redis://localhost:6379/15'
-go test -race -count=1 ./internal/jobs
+go test -race -count=1 ./internal/jobs ./internal/ratelimit
 unset TEST_REDIS_URL
 ```
 
 They use database 15 by convention so a development Redis is not disturbed, and
-they delete only the `teamflow:jobs:*` keys.
+they delete only the `teamflow:jobs:*` and `teamflow:ratelimit:*` keys.
 
 Do not run separate test processes against the same test database concurrently.
 The suite covers token rotation and reuse, concurrent refresh attempts, logout,
@@ -423,6 +424,33 @@ registration, organization switching), the policies remain permissive so those
 flows keep working. Background work runs in `cmd/worker`; see
 [Background jobs](#background-jobs).
 
+## Rate limiting
+
+Rate limits are token buckets evaluated atomically inside Redis with a Lua
+script, so a burst of concurrent requests cannot overspend a budget. Each surface
+gets its own bucket so one caller cannot starve another:
+
+| Surface                                   | Keyed by  | Default limit |
+| ----------------------------------------- | --------- | ------------- |
+| `/api/v1/auth/*` and `/api/v1/invitations/{token}`, `/api/v1/invitations/accept` | client IP | 10 per minute |
+| Organization-scoped routes, bearer session | user      | 300 per minute |
+| Organization-scoped routes, API key        | API key   | 600 per minute |
+
+- **Enabled by default in production**, off elsewhere, so a local checkout is not
+  throttled while a deployment is protected without configuration.
+- **Headers on every limited response:** `X-RateLimit-Limit`,
+  `X-RateLimit-Remaining`, and `X-RateLimit-Reset`. A rejected request also gets
+  `Retry-After` and the standard `RATE_LIMITED` error envelope with HTTP 429.
+- **Buckets are keyed by a hash**, so a user id or IP address never appears in a
+  Redis key.
+- **A Redis outage fails open by default** (`RATE_LIMIT_FAIL_OPEN=true`): the
+  failure is logged and the request proceeds, because a limiter outage must not
+  become an API outage. Set it to `false` to reject instead.
+
+Limits are applied centrally in the router, so a new feature module is covered by
+default. Requests rejected before authentication (a missing credential) do not
+consume budget.
+
 ## Background jobs
 
 `cmd/worker` consumes jobs from a Redis-backed queue and runs them outside the
@@ -486,7 +514,8 @@ redis-cli XLEN  teamflow:jobs:dead     # dead-lettered jobs
       expiration, and revocation
 - [x] Phase 10 — Background jobs: Redis queue, worker pool, retries, backoff, and
       dead-letter handling
-- [ ] Phase 11 — Rate limiting
+- [x] Phase 11 — Rate limiting: Redis token buckets for authentication, users, and
+      API keys
 - [ ] Phase 12 — Audit & observability
 - [ ] Phase 13 — Testing
 - [ ] Phase 14 — Production hardening

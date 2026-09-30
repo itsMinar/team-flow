@@ -196,3 +196,92 @@ func TestLoad_RejectsInvalidAPIKeyConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_RateLimitDefaults(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/db")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "a-sufficiently-long-local-secret")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	// Rate limiting is off in development unless it is asked for.
+	if cfg.RateLimit.Enabled {
+		t.Error("RATE_LIMIT_ENABLED must default to false outside production")
+	}
+	if !cfg.RateLimit.FailOpen {
+		t.Error("RATE_LIMIT_FAIL_OPEN must default to true so a redis outage is not an outage")
+	}
+	if cfg.RateLimit.Auth.Limit != 10 || cfg.RateLimit.Auth.Period != time.Minute {
+		t.Errorf("unexpected auth policy: %+v", cfg.RateLimit.Auth)
+	}
+	if cfg.RateLimit.User.Limit != 300 || cfg.RateLimit.APIKey.Limit != 600 {
+		t.Errorf("unexpected user/api key policies: %+v %+v", cfg.RateLimit.User, cfg.RateLimit.APIKey)
+	}
+}
+
+func TestLoad_RateLimitDefaultsOnInProduction(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/db")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "a-sufficiently-long-production-secret-value")
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("MAIL_TRANSPORT", "none")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.RateLimit.Enabled {
+		t.Error("rate limiting must default to enabled in production")
+	}
+}
+
+func TestLoad_RateLimitOverrides(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/db")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "a-sufficiently-long-local-secret")
+	t.Setenv("RATE_LIMIT_ENABLED", "true")
+	t.Setenv("RATE_LIMIT_FAIL_OPEN", "false")
+	t.Setenv("RATE_LIMIT_AUTH_LIMIT", "5")
+	t.Setenv("RATE_LIMIT_AUTH_PERIOD", "1m")
+	t.Setenv("RATE_LIMIT_USER_LIMIT", "42")
+	t.Setenv("RATE_LIMIT_USER_PERIOD", "30s")
+	t.Setenv("RATE_LIMIT_API_KEY_LIMIT", "7")
+	t.Setenv("RATE_LIMIT_API_KEY_PERIOD", "10s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.RateLimit.Enabled || cfg.RateLimit.FailOpen {
+		t.Fatalf("unexpected flags: %+v", cfg.RateLimit)
+	}
+	if cfg.RateLimit.Auth.Limit != 5 || cfg.RateLimit.User.Limit != 42 ||
+		cfg.RateLimit.User.Period != 30*time.Second || cfg.RateLimit.APIKey.Limit != 7 {
+		t.Fatalf("unexpected policies: %+v", cfg.RateLimit)
+	}
+}
+
+func TestLoad_RejectsInvalidRateLimitConfig(t *testing.T) {
+	cases := []struct{ key, value string }{
+		{"RATE_LIMIT_AUTH_LIMIT", "0"},
+		{"RATE_LIMIT_USER_LIMIT", "-1"},
+		{"RATE_LIMIT_API_KEY_LIMIT", "0"},
+		{"RATE_LIMIT_AUTH_PERIOD", "0s"},
+		{"RATE_LIMIT_USER_PERIOD", "-5m"},
+		{"RATE_LIMIT_API_KEY_PERIOD", "0s"},
+	}
+	for _, test := range cases {
+		t.Run(test.key+"="+test.value, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "postgres://localhost/db")
+			t.Setenv("REDIS_URL", "redis://localhost:6379")
+			t.Setenv("JWT_SECRET", "a-sufficiently-long-local-secret")
+			t.Setenv(test.key, test.value)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() expected an error for %s=%s", test.key, test.value)
+			}
+		})
+	}
+}
