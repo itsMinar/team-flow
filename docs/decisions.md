@@ -2,6 +2,85 @@
 
 Short records of notable engineering decisions. Newest first within each phase.
 
+## Phase 10 — Background jobs
+
+### Redis Streams with a consumer group, not a list
+
+The queue is a Redis Stream with a consumer group. Streams give the three
+properties a job queue needs and that would otherwise have to be rebuilt by hand:
+an explicit acknowledgement step, a pending-entries list that identifies messages
+a consumer took but never finished, and `XAUTOCLAIM` to take that work back after
+a consumer dies. A plain list gives at-most-once delivery with no way to recover
+lost work; a sorted set needs a separate visibility scheme for the same reason.
+
+Delivery is therefore at least once, and handlers are written to be safe to run
+twice. The invitation email handler is: it reloads the invitation, skips it when
+the invitation is no longer pending, and records `notified_at` so a second run
+does not produce a duplicate send.
+
+Delayed work is held in a sorted set scored by due time and promoted into the
+stream by a maintainer goroutine on a short interval. The alternative, sleeping
+in the consumer, would hold a worker slot for the length of the backoff and delay
+unrelated work behind it.
+
+### Payloads are encrypted, because they carry credentials
+
+The invitation email job must carry the raw invitation token: only its hash is
+stored, precisely so the token cannot be recovered. Putting that token in a Redis
+payload therefore moves a live credential into Redis, so payloads are sealed with
+AES-GCM before they are written.
+
+There is no unencrypted mode. A queue that silently writes credentials in the
+clear when a key is missing is a queue someone will run in production without
+realizing what is in it. `JOB_ENCRYPTION_KEY` is the explicit setting, and
+deriving the key from `JWT_SECRET` when it is unset is documented as a convenience
+with the cost of rotating both together.
+
+A payload that fails authentication is dead-lettered, not retried: a wrong key or
+tampered bytes will never become readable.
+
+### Retries, dead letters, and reclaiming
+
+A failing handler schedules the job again with exponential backoff and jitter,
+bounded by `WORKER_RETRY_BASE_DELAY` and `WORKER_RETRY_MAX_DELAY`, up to
+`WORKER_MAX_ATTEMPTS`. Jitter keeps a burst of failing jobs from retrying in
+lockstep. Every attempt acknowledges the original stream entry, so a failing job
+cannot be redelivered forever.
+
+Failures that will never succeed — a deleted target, a malformed payload, an
+unknown job type — are marked permanent and skip the retry budget entirely.
+Everything else ends in the dead-letter stream with its last error, which is a
+plain Redis stream an operator can inspect and, later, replay.
+
+A separate maintainer pass promotes due retries and reclaims jobs idle longer
+than `WORKER_STALE_AFTER`, so a worker crash mid-job does not strand work.
+
+### Shutdown drains; it does not abandon
+
+Worker loops follow the shutdown signal and stop claiming work immediately, but
+the job currently in flight runs on a context detached from that signal, bounded
+by `WORKER_SHUTDOWN_TIMEOUT`. Cancelling a half-sent email or a half-applied
+sweep is worse than taking a moment longer to exit, and anything genuinely
+unfinished stays in the pending-entries list for another worker to reclaim.
+
+This is also why the maintainer goroutine follows the loop context rather than the
+job context: maintenance work must stop as soon as the signal arrives, not idle
+until the drain timeout expires.
+
+### Deliveries that were never queued are reconciled by a sweep
+
+Queueing an invitation email after the transaction commits can fail if Redis is
+down, and an invitation that silently never arrives is worse than one that was
+delivered twice. Two mechanisms cover it: the API falls back to inline delivery
+when the enqueue fails, and `invitations.redeliver` re-queues anything still
+pending with `notified_at` unset.
+
+The sweep rotates the token before re-queueing. The previous link was never
+delivered, so invalidating it costs nothing, and it keeps the "only the hash is
+stored" property: the sweep mints a new token instead of trying to recover one.
+`delivery_attempts` bounds the rotation so a permanently broken transport does not
+generate mail forever.
+
 ## Phase 9 — API keys
 
 ### A key is a credential for one (user, organization) pair, not a role

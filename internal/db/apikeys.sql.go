@@ -230,6 +230,56 @@ func (q *Queries) ListAPIKeys(ctx context.Context, arg ListAPIKeysParams) ([]Api
 	return items, nil
 }
 
+const listExpiredAPIKeys = `-- name: ListExpiredAPIKeys :many
+SELECT id, organization_id, created_by, name, key_prefix, key_last_four, key_hash, expires_at, revoked_at, last_used_at, created_at, updated_at FROM api_keys
+WHERE organization_id = $1
+  AND revoked_at IS NULL
+  AND expires_at < $2
+ORDER BY expires_at ASC
+LIMIT $3::bigint
+`
+
+type ListExpiredAPIKeysParams struct {
+	OrganizationID uuid.UUID
+	ExpiredBefore  time.Time
+	RowLimit       int64
+}
+
+// Expired keys that have been dead long enough to be worth revoking. The grace
+// period keeps recently expired keys visible for an operator to review.
+func (q *Queries) ListExpiredAPIKeys(ctx context.Context, arg ListExpiredAPIKeysParams) ([]ApiKey, error) {
+	rows, err := q.db.Query(ctx, listExpiredAPIKeys, arg.OrganizationID, arg.ExpiredBefore, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ApiKey{}
+	for rows.Next() {
+		var i ApiKey
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrganizationID,
+			&i.CreatedBy,
+			&i.Name,
+			&i.KeyPrefix,
+			&i.KeyLastFour,
+			&i.KeyHash,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+			&i.LastUsedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokeAPIKey = `-- name: RevokeAPIKey :one
 UPDATE api_keys
 SET revoked_at = $1
@@ -262,6 +312,22 @@ func (q *Queries) RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) (Api
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const revokeAPIKeyByID = `-- name: RevokeAPIKeyByID :exec
+UPDATE api_keys
+SET revoked_at = now()
+WHERE id = $1 AND organization_id = $2
+`
+
+type RevokeAPIKeyByIDParams struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+}
+
+func (q *Queries) RevokeAPIKeyByID(ctx context.Context, arg RevokeAPIKeyByIDParams) error {
+	_, err := q.db.Exec(ctx, revokeAPIKeyByID, arg.ID, arg.OrganizationID)
+	return err
 }
 
 const touchAPIKey = `-- name: TouchAPIKey :exec

@@ -59,7 +59,7 @@ func newAppTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, *recording
 		Projects:     projects.NewHandler(projects.NewService(pool, orgSvc), logger),
 		Tasks:        tasks.NewHandler(tasks.NewService(pool, orgSvc), logger),
 		Invitations: invitations.NewHandler(
-			invitations.NewService(pool, orgSvc, authSvc, sender, cfg.Invite.TTL, cfg.Invite.BaseURL, logger),
+			invitations.NewService(pool, orgSvc, authSvc, sender, nil, cfg.Invite.TTL, cfg.Invite.BaseURL, logger),
 			logger),
 		APIKeys: apikeys.NewHandler(apiKeySvc, logger),
 	})

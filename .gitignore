@@ -4,6 +4,8 @@
 !.env.example
 
 # Build artifacts
+/api
+/worker
 /bin/
 /out/
 *.exe

@@ -6,7 +6,8 @@ infrastructure while their data stays strictly isolated.
 
 This repository is being built incrementally, phase by phase. **Phases 1
 (Foundation), 2 (Authentication), 3 (Multi-tenancy), 4 (RBAC), 5 (Teams), 6
-(Projects), 7 (Tasks), 8 (Invitations), and 9 (API keys) are complete.** See
+(Projects), 7 (Tasks), 8 (Invitations), 9 (API keys), and 10 (Background jobs)
+are complete.** See
 [Roadmap](#roadmap) for what is done and what comes next.
 
 ## Overview
@@ -67,6 +68,7 @@ internal/
   db/          Generated sqlc queries and models
   fieldtypes/  Shared calendar-date and partial-update field types
   health/      Liveness and readiness handlers
+  jobs/        Redis job queue, worker pool, retries, dead letters
   httpx/       Response envelope + typed error mapping
   invitations/ Organization invitations, acceptance, and token lifecycle
   permissions/  Permission keys and default role grants
@@ -119,7 +121,7 @@ curl -i localhost:8080/health   # 200 {"data":{"status":"ok"}}
 curl -s localhost:8080/ready     # verifies PostgreSQL + Redis
 ```
 
-Run the worker in another shell:
+Run the worker in another shell. It consumes the same queue the API writes to:
 
 ```bash
 make worker
@@ -145,6 +147,17 @@ make migrate-up DATABASE_URL="$TEST_DATABASE_URL"
 go test -race -count=1 ./...
 unset TEST_DATABASE_URL
 ```
+
+Queue tests need a Redis instance and are skipped without it:
+
+```bash
+export TEST_REDIS_URL='redis://localhost:6379/15'
+go test -race -count=1 ./internal/jobs
+unset TEST_REDIS_URL
+```
+
+They use database 15 by convention so a development Redis is not disturbed, and
+they delete only the `teamflow:jobs:*` keys.
 
 Do not run separate test processes against the same test database concurrently.
 The suite covers token rotation and reuse, concurrent refresh attempts, logout,
@@ -229,7 +242,8 @@ already-issued access tokens: those remain valid until their expiration.
 
 On `SIGINT`/`SIGTERM` the API stops accepting new connections, drains in-flight
 requests within `HTTP_SHUTDOWN_TIMEOUT`, then closes Redis and PostgreSQL and
-exits cleanly. The worker follows the same pattern.
+exits cleanly. The worker stops claiming jobs, finishes the job it holds within
+`WORKER_SHUTDOWN_TIMEOUT`, and exits.
 
 ## Multi-tenancy, RBAC, jobs
 
@@ -340,7 +354,9 @@ Transactional email goes through the `mailer` package. `MAIL_TRANSPORT=log`
 writes the invitation link to the application log for local development and is
 rejected when `APP_ENV=production`, so a live invitation link can never end up
 in a production log sink. `MAIL_TRANSPORT=none` disables delivery entirely.
-Phase 10 replaces the log transport with the queued sender used in production.
+Phase 10 queues that email on the worker (see
+[Background jobs](#background-jobs)); the log transport is still what actually
+sends it in development, so production needs a real transport implementation.
 
 API keys are a second credential for server-to-server and automation calls. They
 are managed with the new `api_keys.manage` permission, which is granted to Owner
@@ -404,8 +420,54 @@ RLS, the api/worker connect as the non-superuser `teamflow_app` role (the Docker
 stack is configured this way; run the app as a non-superuser in production too),
 while migrations run as the owner. When no tenant context is set (login,
 registration, organization switching), the policies remain permissive so those
-flows keep working. Background jobs are implemented in a later phase; see the
-roadmap.
+flows keep working. Background work runs in `cmd/worker`; see
+[Background jobs](#background-jobs).
+
+## Background jobs
+
+`cmd/worker` consumes jobs from a Redis-backed queue and runs them outside the
+request path. The queue is built on Redis Streams with a consumer group, which
+gives at-least-once delivery, an explicit acknowledgement step, and a
+pending-entries list that identifies work abandoned by a crashed worker.
+
+- **Encrypted payloads.** Job payloads are sealed with AES-GCM before they reach
+  Redis, because a payload can carry a credential (the invitation email job
+  carries the one-time token). Set `JOB_ENCRYPTION_KEY`, or let it be derived
+  from `JWT_SECRET`. There is no unencrypted mode.
+- **Retries with backoff.** A failed job is rescheduled with exponential backoff
+  and jitter between `WORKER_RETRY_BASE_DELAY` and `WORKER_RETRY_MAX_DELAY`, up
+  to `WORKER_MAX_ATTEMPTS` attempts. Delayed work is held in a sorted set and
+  promoted by the workers, so nothing blocks or polls per job.
+- **Dead letters.** A job that is permanently rejected or out of attempts is moved
+  to the Redis stream `teamflow:jobs:dead` with its last error, and every attempt
+  logs the job id and type.
+- **Safe shutdown.** On `SIGINT`/`SIGTERM` the workers stop claiming work and
+  drain the job in flight within `WORKER_SHUTDOWN_TIMEOUT`. Unfinished work stays
+  pending and is reclaimed after `WORKER_STALE_AFTER`.
+- **Tenant-scoped handlers.** Maintenance jobs enumerate active organizations and
+  run their statements inside each organization's own transaction.
+
+Job types:
+
+| Job type                  | Runs on | Purpose                                                        |
+| ------------------------- | ------- | -------------------------------------------------------------- |
+| `invitation.email`        | API     | Delivers one invitation email; records `notified_at` on success |
+| `invitations.redeliver`   | Worker  | Re-queues invitations never handed to the queue, rotating a token |
+| `api_keys.expire_sweep`   | Worker  | Revokes API keys that expired more than 30 days ago            |
+
+`invitations.redeliver` and `api_keys.expire_sweep` re-schedule themselves after
+each run. If the queue is unreachable when an invitation is created, the API
+falls back to delivering the email inline and records the delivery, so a Redis
+outage never loses an invitation.
+
+Inspect queue state with `redis-cli`:
+
+```bash
+redis-cli XLEN  teamflow:jobs:stream   # ready to be claimed
+redis-cli XPENDING teamflow:jobs:stream teamflow-workers
+redis-cli ZCARD  teamflow:jobs:retry   # delayed retries
+redis-cli XLEN  teamflow:jobs:dead     # dead-lettered jobs
+```
 
 ## Roadmap
 
@@ -422,7 +484,8 @@ roadmap.
       and email delivery
 - [x] Phase 9 — API keys: one-time display, hashed storage, authentication,
       expiration, and revocation
-- [ ] Phase 10 — Background jobs
+- [x] Phase 10 — Background jobs: Redis queue, worker pool, retries, backoff, and
+      dead-letter handling
 - [ ] Phase 11 — Rate limiting
 - [ ] Phase 12 — Audit & observability
 - [ ] Phase 13 — Testing

@@ -23,6 +23,9 @@ import (
 	"github.com/itsMinar/team-flow/internal/permissions"
 )
 
+// maintenanceBatchSize bounds one maintenance sweep over organizations.
+const maintenanceBatchSize = 1000
+
 // System roles seeded for every organization.
 var defaultRoles = []struct {
 	name string
@@ -593,4 +596,26 @@ func slugify(name string) string {
 		out = "org"
 	}
 	return out
+}
+
+// ForEachActiveOrganization runs fn once per active organization, optionally
+// narrowed to a single organization.
+//
+// Background maintenance jobs use it to apply tenant-scoped work everywhere. fn
+// is responsible for opening its own tenant transaction; the organization ID is
+// passed in precisely so the callee can scope its statements.
+func (s *Service) ForEachActiveOrganization(ctx context.Context, only uuid.UUID, fn func(orgID uuid.UUID) error) error {
+	if only != uuid.Nil {
+		return fn(only)
+	}
+	ids, err := s.q.ListActiveOrganizationIDs(ctx, maintenanceBatchSize)
+	if err != nil {
+		return fmt.Errorf("list organizations for maintenance: %w", err)
+	}
+	for _, orgID := range ids {
+		if err := fn(orgID); err != nil {
+			return err
+		}
+	}
+	return nil
 }

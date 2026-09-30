@@ -18,7 +18,7 @@ SET status = 'accepted',
     accepted_at = $1,
     accepted_by = $2
 WHERE id = $3 AND organization_id = $4
-RETURNING id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at
+RETURNING id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at, notified_at, delivery_attempts
 `
 
 type AcceptInvitationParams struct {
@@ -50,6 +50,8 @@ func (q *Queries) AcceptInvitation(ctx context.Context, arg AcceptInvitationPara
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NotifiedAt,
+		&i.DeliveryAttempts,
 	)
 	return i, err
 }
@@ -79,7 +81,7 @@ INSERT INTO invitations (
     organization_id, email, role_id, status, token_hash, invited_by, expires_at
 )
 VALUES ($1, $2, $3, 'pending', $4, $5, $6)
-RETURNING id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at
+RETURNING id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at, notified_at, delivery_attempts
 `
 
 type CreateInvitationParams struct {
@@ -115,6 +117,8 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NotifiedAt,
+		&i.DeliveryAttempts,
 	)
 	return i, err
 }
@@ -151,7 +155,7 @@ func (q *Queries) GetActiveMembershipByEmail(ctx context.Context, arg GetActiveM
 }
 
 const getInvitationByID = `-- name: GetInvitationByID :one
-SELECT id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at FROM invitations
+SELECT id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at, notified_at, delivery_attempts FROM invitations
 WHERE id = $1 AND organization_id = $2
 `
 
@@ -177,12 +181,34 @@ func (q *Queries) GetInvitationByID(ctx context.Context, arg GetInvitationByIDPa
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NotifiedAt,
+		&i.DeliveryAttempts,
 	)
 	return i, err
 }
 
+const getInvitationByIDForJob = `-- name: GetInvitationByIDForJob :one
+SELECT id, organization_id FROM invitations
+WHERE id = $1
+`
+
+type GetInvitationByIDForJobRow struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+}
+
+// Resolves an invitation's organization from an id that came from the job queue
+// rather than from a request, so the worker can open a tenant transaction for
+// it. It is never used to serve client input.
+func (q *Queries) GetInvitationByIDForJob(ctx context.Context, id uuid.UUID) (GetInvitationByIDForJobRow, error) {
+	row := q.db.QueryRow(ctx, getInvitationByIDForJob, id)
+	var i GetInvitationByIDForJobRow
+	err := row.Scan(&i.ID, &i.OrganizationID)
+	return i, err
+}
+
 const getInvitationByIDForUpdate = `-- name: GetInvitationByIDForUpdate :one
-SELECT id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at FROM invitations
+SELECT id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at, notified_at, delivery_attempts FROM invitations
 WHERE id = $1 AND organization_id = $2
 FOR UPDATE
 `
@@ -209,12 +235,14 @@ func (q *Queries) GetInvitationByIDForUpdate(ctx context.Context, arg GetInvitat
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NotifiedAt,
+		&i.DeliveryAttempts,
 	)
 	return i, err
 }
 
 const getInvitationByTokenHash = `-- name: GetInvitationByTokenHash :one
-SELECT id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at FROM invitations
+SELECT id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at, notified_at, delivery_attempts FROM invitations
 WHERE token_hash = $1
 `
 
@@ -235,12 +263,14 @@ func (q *Queries) GetInvitationByTokenHash(ctx context.Context, tokenHash string
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NotifiedAt,
+		&i.DeliveryAttempts,
 	)
 	return i, err
 }
 
 const getInvitationByTokenHashForUpdate = `-- name: GetInvitationByTokenHashForUpdate :one
-SELECT id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at FROM invitations
+SELECT id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at, notified_at, delivery_attempts FROM invitations
 WHERE token_hash = $1
 FOR UPDATE
 `
@@ -262,12 +292,14 @@ func (q *Queries) GetInvitationByTokenHashForUpdate(ctx context.Context, tokenHa
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NotifiedAt,
+		&i.DeliveryAttempts,
 	)
 	return i, err
 }
 
 const listInvitations = `-- name: ListInvitations :many
-SELECT id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at FROM invitations
+SELECT id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at, notified_at, delivery_attempts FROM invitations
 WHERE organization_id = $1
   AND ($2::text IS NULL OR status = $2::text)
   AND ($3::citext IS NULL OR email = $3::citext)
@@ -324,6 +356,67 @@ func (q *Queries) ListInvitations(ctx context.Context, arg ListInvitationsParams
 			&i.RevokedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.NotifiedAt,
+			&i.DeliveryAttempts,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUndeliveredInvitations = `-- name: ListUndeliveredInvitations :many
+SELECT id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at, notified_at, delivery_attempts FROM invitations
+WHERE status = 'pending'
+  AND notified_at IS NULL
+  AND delivery_attempts = $1::int
+  AND created_at < $2
+  AND organization_id = $3
+ORDER BY created_at ASC
+LIMIT $4::bigint
+`
+
+type ListUndeliveredInvitationsParams struct {
+	MaxAttemptsComparison int32
+	CreatedBefore         time.Time
+	OrganizationID        uuid.UUID
+	RowLimit              int64
+}
+
+func (q *Queries) ListUndeliveredInvitations(ctx context.Context, arg ListUndeliveredInvitationsParams) ([]Invitation, error) {
+	rows, err := q.db.Query(ctx, listUndeliveredInvitations,
+		arg.MaxAttemptsComparison,
+		arg.CreatedBefore,
+		arg.OrganizationID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Invitation{}
+	for rows.Next() {
+		var i Invitation
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrganizationID,
+			&i.Email,
+			&i.RoleID,
+			&i.Status,
+			&i.TokenHash,
+			&i.InvitedBy,
+			&i.ExpiresAt,
+			&i.AcceptedAt,
+			&i.AcceptedBy,
+			&i.RevokedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.NotifiedAt,
+			&i.DeliveryAttempts,
 		); err != nil {
 			return nil, err
 		}
@@ -339,7 +432,7 @@ const markInvitationExpired = `-- name: MarkInvitationExpired :one
 UPDATE invitations
 SET status = 'expired'
 WHERE id = $1 AND organization_id = $2 AND status = 'pending'
-RETURNING id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at
+RETURNING id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at, notified_at, delivery_attempts
 `
 
 type MarkInvitationExpiredParams struct {
@@ -364,8 +457,27 @@ func (q *Queries) MarkInvitationExpired(ctx context.Context, arg MarkInvitationE
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NotifiedAt,
+		&i.DeliveryAttempts,
 	)
 	return i, err
+}
+
+const markInvitationNotified = `-- name: MarkInvitationNotified :exec
+UPDATE invitations
+SET notified_at = now()
+WHERE id = $1 AND organization_id = $2
+`
+
+type MarkInvitationNotifiedParams struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+}
+
+// Records that the invitation email reached a transport.
+func (q *Queries) MarkInvitationNotified(ctx context.Context, arg MarkInvitationNotifiedParams) error {
+	_, err := q.db.Exec(ctx, markInvitationNotified, arg.ID, arg.OrganizationID)
+	return err
 }
 
 const revokeInvitation = `-- name: RevokeInvitation :one
@@ -373,7 +485,7 @@ UPDATE invitations
 SET status = 'revoked',
     revoked_at = $1
 WHERE id = $2 AND organization_id = $3
-RETURNING id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at
+RETURNING id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at, notified_at, delivery_attempts
 `
 
 type RevokeInvitationParams struct {
@@ -399,6 +511,50 @@ func (q *Queries) RevokeInvitation(ctx context.Context, arg RevokeInvitationPara
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NotifiedAt,
+		&i.DeliveryAttempts,
+	)
+	return i, err
+}
+
+const rotateInvitationForDelivery = `-- name: RotateInvitationForDelivery :one
+UPDATE invitations
+SET token_hash = $1,
+    delivery_attempts = delivery_attempts + 1
+WHERE id = $2 AND organization_id = $3
+  AND status = 'pending' AND notified_at IS NULL
+RETURNING id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at, notified_at, delivery_attempts
+`
+
+type RotateInvitationForDeliveryParams struct {
+	TokenHash      string
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+}
+
+// The redelivery sweep issues a fresh token for an invitation that was never
+// queued. Rotating invalidates the previous link, which is safe because it was
+// never delivered, and increments the attempt counter so a permanently failing
+// transport is not retried forever.
+func (q *Queries) RotateInvitationForDelivery(ctx context.Context, arg RotateInvitationForDeliveryParams) (Invitation, error) {
+	row := q.db.QueryRow(ctx, rotateInvitationForDelivery, arg.TokenHash, arg.ID, arg.OrganizationID)
+	var i Invitation
+	err := row.Scan(
+		&i.ID,
+		&i.OrganizationID,
+		&i.Email,
+		&i.RoleID,
+		&i.Status,
+		&i.TokenHash,
+		&i.InvitedBy,
+		&i.ExpiresAt,
+		&i.AcceptedAt,
+		&i.AcceptedBy,
+		&i.RevokedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.NotifiedAt,
+		&i.DeliveryAttempts,
 	)
 	return i, err
 }
@@ -408,7 +564,7 @@ UPDATE invitations
 SET token_hash = $1,
     expires_at = $2
 WHERE id = $3 AND organization_id = $4 AND status = 'pending'
-RETURNING id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at
+RETURNING id, organization_id, email, role_id, status, token_hash, invited_by, expires_at, accepted_at, accepted_by, revoked_at, created_at, updated_at, notified_at, delivery_attempts
 `
 
 type RotateInvitationTokenParams struct {
@@ -442,6 +598,8 @@ func (q *Queries) RotateInvitationToken(ctx context.Context, arg RotateInvitatio
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NotifiedAt,
+		&i.DeliveryAttempts,
 	)
 	return i, err
 }

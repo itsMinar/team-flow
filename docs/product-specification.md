@@ -178,6 +178,26 @@ return typed domain errors which the HTTP layer maps to status codes.
 - Unit, integration, HTTP, RLS, authorization, migration, formatting, static, and
   race checks pass before Phase 9 is marked complete.
 
+## Phase 10 Definition of Done
+
+- Jobs are queued in Redis and processed by a separate worker process with a
+  configurable pool of consumers.
+- Delivery is at least once with explicit acknowledgement, and work abandoned by a
+  failed worker is reclaimed rather than lost.
+- Job payloads are encrypted before they are written to Redis, and a payload that
+  cannot be authenticated is never retried.
+- Failed jobs are retried with exponential backoff and jitter, bounded by
+  configuration, and exhausted or permanently rejected jobs are dead-lettered with
+  their last error.
+- Shutdown stops claiming work immediately and drains the in-flight job within a
+  configured timeout.
+- Invitation emails are delivered by the worker rather than in the request, with
+  delivery recorded so an invitation that never reached the queue is re-queued.
+- Maintenance jobs run tenant-scoped work inside each organization's own
+  transaction.
+- Unit, integration, HTTP, migration, formatting, static, and race checks pass
+  before Phase 10 is marked complete.
+
 ## Definition of Done for the Product
 
 The product is complete only when the API, worker, migrations, seed data,

@@ -55,3 +55,17 @@ LIMIT sqlc.arg('page_limit')::bigint OFFSET sqlc.arg('page_offset')::bigint;
 SELECT count(*) FROM api_keys
 WHERE organization_id = sqlc.arg('organization_id')
   AND (sqlc.arg('include_revoked')::bool OR revoked_at IS NULL);
+-- name: ListExpiredAPIKeys :many
+-- Expired keys that have been dead long enough to be worth revoking. The grace
+-- period keeps recently expired keys visible for an operator to review.
+SELECT * FROM api_keys
+WHERE organization_id = sqlc.arg('organization_id')
+  AND revoked_at IS NULL
+  AND expires_at < sqlc.arg('expired_before')
+ORDER BY expires_at ASC
+LIMIT sqlc.arg('row_limit')::bigint;
+
+-- name: RevokeAPIKeyByID :exec
+UPDATE api_keys
+SET revoked_at = now()
+WHERE id = sqlc.arg('id') AND organization_id = sqlc.arg('organization_id');

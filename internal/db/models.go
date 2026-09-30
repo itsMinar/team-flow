@@ -37,19 +37,21 @@ type ApiKey struct {
 }
 
 type Invitation struct {
-	ID             uuid.UUID
-	OrganizationID uuid.UUID
-	Email          string
-	RoleID         uuid.UUID
-	Status         string
-	TokenHash      string
-	InvitedBy      uuid.UUID
-	ExpiresAt      time.Time
-	AcceptedAt     *time.Time
-	AcceptedBy     *uuid.UUID
-	RevokedAt      *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID               uuid.UUID
+	OrganizationID   uuid.UUID
+	Email            string
+	RoleID           uuid.UUID
+	Status           string
+	TokenHash        string
+	InvitedBy        uuid.UUID
+	ExpiresAt        time.Time
+	AcceptedAt       *time.Time
+	AcceptedBy       *uuid.UUID
+	RevokedAt        *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	NotifiedAt       *time.Time
+	DeliveryAttempts int32
 }
 
 type Organization struct {

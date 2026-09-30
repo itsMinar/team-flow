@@ -17,6 +17,7 @@ import (
 	"github.com/itsMinar/team-flow/internal/database"
 	"github.com/itsMinar/team-flow/internal/db"
 	"github.com/itsMinar/team-flow/internal/httpx"
+	"github.com/itsMinar/team-flow/internal/jobs"
 	"github.com/itsMinar/team-flow/internal/mailer"
 	"github.com/itsMinar/team-flow/internal/organizations"
 	"github.com/itsMinar/team-flow/internal/permissions"
@@ -39,18 +40,20 @@ type Service struct {
 	orgs    *organizations.Service
 	auth    *auth.Service
 	mailer  mailer.Sender
+	queue   jobs.Enqueuer
 	logger  *slog.Logger
 	ttl     time.Duration
 	baseURL string
 }
 
-// NewService constructs the invitations Service.
+// NewService constructs the invitations Service. The queue is optional: without
+// one, invitation emails are delivered inline instead of through a worker.
 func NewService(pool *pgxpool.Pool, orgs *organizations.Service, authSvc *auth.Service,
-	sender mailer.Sender, ttl time.Duration, baseURL string, logger *slog.Logger,
+	sender mailer.Sender, queue jobs.Enqueuer, ttl time.Duration, baseURL string, logger *slog.Logger,
 ) *Service {
 	return &Service{
-		pool: pool, q: db.New(pool), orgs: orgs, auth: authSvc,
-		mailer: sender, ttl: ttl, baseURL: strings.TrimRight(baseURL, "/"), logger: logger,
+		pool: pool, q: db.New(pool), orgs: orgs, auth: authSvc, mailer: sender, queue: queue,
+		ttl: ttl, baseURL: strings.TrimRight(baseURL, "/"), logger: logger,
 	}
 }
 
@@ -141,10 +144,42 @@ func (s *Service) Create(ctx context.Context, userID, orgID uuid.UUID, in Create
 	}
 
 	dto := toDTO(invitation, roleName, now)
-	// Delivery happens after the transaction commits so an email can never
+	// Delivery is dispatched after the transaction commits so a message can never
 	// reference an invitation that was rolled back.
-	s.deliver(ctx, invitation, dto, orgName, token)
+	s.dispatchEmail(ctx, invitation, dto, orgName, token)
 	return dto, nil
+}
+
+// dispatchEmail hands the invitation email to the worker, falling back to inline
+// delivery when no queue is configured or the queue is unavailable.
+//
+// The fallback is what keeps a Redis outage from silently swallowing invitations,
+// and the redelivery sweep is the second safety net for the case where both the
+// queue and the inline attempt fail.
+func (s *Service) dispatchEmail(ctx context.Context, invitation db.Invitation, dto InvitationDTO, orgName, token string) {
+	if s.queue != nil {
+		if _, err := s.enqueueEmail(ctx, invitation, token); err != nil {
+			s.logger.Error("failed to queue invitation email, delivering inline",
+				slog.String("invitation_id", dto.ID.String()),
+				slog.Any("error", err),
+			)
+			s.deliverInline(ctx, invitation, dto, orgName, token)
+			return
+		}
+		return
+	}
+	s.deliverInline(ctx, invitation, dto, orgName, token)
+}
+
+// deliverInline sends the email in the request and records it, so an invitation
+// delivered without a worker is not picked up by the redelivery sweep later.
+func (s *Service) deliverInline(ctx context.Context, invitation db.Invitation, dto InvitationDTO, orgName, token string) {
+	s.sendInvitationEmail(ctx, invitation, dto, orgName, token)
+	if err := s.markNotified(ctx, invitation.ID, invitation.OrganizationID); err != nil {
+		s.logger.Error("failed to record inline invitation delivery",
+			slog.String("invitation_id", invitation.ID.String()),
+			slog.Any("error", err))
+	}
 }
 
 // checkInvitee rejects invitations for someone who already belongs to the
@@ -214,7 +249,7 @@ func (s *Service) Resend(ctx context.Context, userID, orgID, invitationID uuid.U
 	}
 
 	dto := toDTO(invitation, roleName, now)
-	s.deliver(ctx, invitation, dto, orgName, token)
+	s.dispatchEmail(ctx, invitation, dto, orgName, token)
 	return dto, nil
 }
 
@@ -539,12 +574,13 @@ func (s *Service) lookup(ctx context.Context, token string) (db.Invitation, db.O
 	return invitation, org, role, nil
 }
 
-// deliver emails the invitation link.
+// sendInvitationEmail hands the invitation link to the configured transport.
 //
 // A delivery failure is logged rather than returned: the invitation exists and
 // can be resent, while reporting an error would suggest the invite was never
-// created.
-func (s *Service) deliver(ctx context.Context, invitation db.Invitation, dto InvitationDTO, orgName, token string) {
+// created. On the worker path the job still fails and is retried, so a temporary
+// transport outage does not lose the message.
+func (s *Service) sendInvitationEmail(ctx context.Context, invitation db.Invitation, dto InvitationDTO, orgName, token string) {
 	link := acceptURL(s.baseURL, token)
 	msg := mailer.Message{
 		To:      invitation.Email,

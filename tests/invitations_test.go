@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,25 +26,55 @@ import (
 // recordingSender captures the messages the service "delivers" so tests can act
 // on the invitation link exactly as the invitee would.
 type recordingSender struct {
+	mu       sync.Mutex
 	messages []mailer.Message
+	calls    int
 	err      error
 }
 
 func (s *recordingSender) Send(_ context.Context, msg mailer.Message) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	if s.err != nil {
+		return s.err
+	}
 	s.messages = append(s.messages, msg)
-	return s.err
+	return nil
 }
 
-func (s *recordingSender) lastLink(t *testing.T) string {
+func (s *recordingSender) lastMessage(t *testing.T) mailer.Message {
 	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(s.messages) == 0 {
 		t.Fatal("no invitation email was delivered")
 	}
-	link := s.messages[len(s.messages)-1].Link
+	return s.messages[len(s.messages)-1]
+}
+
+// lastLink returns the accept link from the most recently delivered message. It
+// is used where no queue is configured and delivery is inline.
+func (s *recordingSender) lastLink(t *testing.T) string {
+	t.Helper()
+	link := s.lastMessage(t).Link
 	if link == "" {
 		t.Fatal("delivered message has no invitation link")
 	}
 	return link
+}
+
+func (s *recordingSender) messageCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.messages)
+}
+
+// callCount counts delivery attempts, including ones that failed.
+func (s *recordingSender) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
 }
 
 // tokenFromLink extracts the token from a delivered accept link.
@@ -68,7 +99,8 @@ func TestInvitationsLifecycleIsolationAndRBAC(t *testing.T) {
 	jwt := auth.NewJWTService("integration-secret", "teamflow", 15*time.Minute)
 	authSvc := auth.NewService(pool, jwt, 720*time.Hour, logger)
 	sender := &recordingSender{}
-	svc := invitations.NewService(pool, orgSvc, authSvc, sender, 7*24*time.Hour, "http://app.example.com", logger)
+	queue := &recordingQueue{}
+	svc := invitations.NewService(pool, orgSvc, authSvc, sender, queue, 7*24*time.Hour, "http://app.example.com", logger)
 	firstPage := httpx.PageRequest{Page: 1, PageSize: httpx.DefaultPageSize}
 
 	userA, orgA := registerOrg(t, pool, "inv-a@example.com", "Invitations Org A")
@@ -89,27 +121,42 @@ func TestInvitationsLifecycleIsolationAndRBAC(t *testing.T) {
 		if invitation.ExpiresAt.Before(time.Now().Add(6 * 24 * time.Hour)) {
 			t.Fatalf("unexpected expiry: %v", invitation.ExpiresAt)
 		}
-		// The link is delivered, never persisted.
-		link := sender.lastLink(t)
-		if !strings.HasPrefix(link, "http://app.example.com/invitations/accept?token=") {
-			t.Fatalf("unexpected link %q", link)
+		// Delivery is queued rather than sent inline, and the token travels in the
+		// job payload instead of being persisted.
+		queued := queue.snapshot()
+		if len(queued) != 1 || queued[0].Type != invitations.JobTypeEmail {
+			t.Fatalf("expected one queued email job, got %+v", queued)
 		}
-		message := sender.messages[len(sender.messages)-1]
+		payload := queue.lastEmailPayload(t)
+		if payload.InvitationID != invitation.ID || payload.Token == "" {
+			t.Fatalf("unexpected payload: %+v", payload)
+		}
+		var storedHash string
+		if err := pool.QueryRow(ctx, `SELECT token_hash FROM invitations WHERE id = $1`, invitation.ID).Scan(&storedHash); err != nil {
+			t.Fatal(err)
+		}
+		if storedHash == "" || storedHash == payload.Token {
+			t.Fatalf("the raw token must never be stored, got %q", storedHash)
+		}
+		// Nothing is sent until the worker runs the job.
+		if sender.messageCount() != 0 {
+			t.Fatal("the API must not deliver the email itself")
+		}
+		if err := svc.EmailJobHandler(ctx, queued[0].Payload); err != nil {
+			t.Fatalf("email job: %v", err)
+		}
+		message := sender.lastMessage(t)
+		if !strings.HasPrefix(message.Link, "http://app.example.com/invitations/accept?token=") {
+			t.Fatalf("unexpected link %q", message.Link)
+		}
 		if message.To != "invitee@example.com" || !strings.Contains(message.Subject, "Invitations Org A") {
 			t.Fatalf("unexpected message: %+v", message)
 		}
 		if message.Metadata["invitation_id"] != invitation.ID.String() {
 			t.Fatalf("message is not traceable: %+v", message.Metadata)
 		}
-		var storedHash string
-		if err := pool.QueryRow(ctx, `SELECT token_hash FROM invitations WHERE id = $1`, invitation.ID).Scan(&storedHash); err != nil {
-			t.Fatal(err)
-		}
-		if storedHash == "" || storedHash == tokenFromLink(t, link) {
-			t.Fatalf("the raw token must never be stored, got %q", storedHash)
-		}
 
-		preview, err := svc.Preview(ctx, tokenFromLink(t, link))
+		preview, err := svc.Preview(ctx, payload.Token)
 		if err != nil {
 			t.Fatalf("preview: %v", err)
 		}
@@ -136,7 +183,7 @@ func TestInvitationsLifecycleIsolationAndRBAC(t *testing.T) {
 	})
 
 	t.Run("accepting creates the account, membership, and session", func(t *testing.T) {
-		token := tokenFromLink(t, sender.lastLink(t))
+		token := queue.lastToken(t)
 		result, err := svc.Accept(ctx, uuid.Nil, invitations.AcceptInput{
 			Token: token, Password: "StrongPassword123", FirstName: "Ada", LastName: "Invitee",
 		}, auth.RequestMeta{})
@@ -202,7 +249,7 @@ func TestInvitationsLifecycleIsolationAndRBAC(t *testing.T) {
 		if err != nil {
 			t.Fatalf("invite existing member: %v", err)
 		}
-		token := tokenFromLink(t, sender.lastLink(t))
+		token := queue.lastToken(t)
 
 		// Accepting anonymously is refused because an account already exists.
 		_, err = svc.Accept(ctx, uuid.Nil, invitations.AcceptInput{
@@ -234,7 +281,7 @@ func TestInvitationsLifecycleIsolationAndRBAC(t *testing.T) {
 		}
 		_ = other
 		_, err = svc.Accept(ctx, existing, invitations.AcceptInput{
-			Token: tokenFromLink(t, sender.lastLink(t)),
+			Token: queue.lastToken(t),
 		}, auth.RequestMeta{})
 		requireAPIError(t, err, 403, "INVITATION_EMAIL_MISMATCH")
 	})
@@ -250,7 +297,7 @@ func TestInvitationsLifecycleIsolationAndRBAC(t *testing.T) {
 			WHERE id = $1`, invitation.ID); err != nil {
 			t.Fatal(err)
 		}
-		token := tokenFromLink(t, sender.lastLink(t))
+		token := queue.lastToken(t)
 
 		preview, err := svc.Preview(ctx, token)
 		if err != nil || preview.Status != invitations.StatusExpired {
@@ -285,12 +332,12 @@ func TestInvitationsLifecycleIsolationAndRBAC(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		firstToken := tokenFromLink(t, sender.lastLink(t))
+		firstToken := queue.lastToken(t)
 		resent, err := svc.Resend(ctx, userA, orgA, invitation.ID)
 		if err != nil || resent.Status != invitations.StatusPending {
 			t.Fatalf("resend: %+v, %v", resent, err)
 		}
-		secondToken := tokenFromLink(t, sender.lastLink(t))
+		secondToken := queue.lastToken(t)
 		if firstToken == secondToken {
 			t.Fatal("resending must issue a new token")
 		}
@@ -304,7 +351,7 @@ func TestInvitationsLifecycleIsolationAndRBAC(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		revokeToken := tokenFromLink(t, sender.lastLink(t))
+		revokeToken := queue.lastToken(t)
 		if err := svc.Revoke(ctx, userA, orgA, revoked.ID); err != nil {
 			t.Fatalf("revoke: %v", err)
 		}
@@ -434,15 +481,21 @@ func TestInvitationsLifecycleIsolationAndRBAC(t *testing.T) {
 		}
 	})
 
-	t.Run("delivery failures do not lose the invitation", func(t *testing.T) {
+	t.Run("a queue outage falls back to inline delivery", func(t *testing.T) {
+		queue.err = errors.New("dial tcp: connection refused")
 		sender.err = errors.New("smtp unavailable")
-		defer func() { sender.err = nil }()
+		before := sender.callCount()
+		defer func() { queue.err, sender.err = nil, nil }()
 		invitation, err := svc.Create(ctx, userA, orgA, invitations.CreateInput{Email: "unreachable@example.com", RoleID: memberRole})
 		if err != nil {
-			t.Fatalf("a delivery failure must not fail the request: %v", err)
+			t.Fatalf("a queue outage must not fail the request: %v", err)
 		}
 		if invitation.Status != invitations.StatusPending {
 			t.Fatalf("unexpected invitation: %+v", invitation)
+		}
+		// The transport is attempted once, inline, and the failure is not retried here.
+		if got := sender.callCount() - before; got != 1 {
+			t.Fatalf("the transport was called %d times, want 1", got)
 		}
 		// The invitation still exists and is listed, so it can be resent.
 		email := "unreachable@example.com"

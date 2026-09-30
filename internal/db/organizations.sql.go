@@ -75,6 +75,35 @@ func (q *Queries) GetOrganizationBySlug(ctx context.Context, slug string) (Organ
 	return i, err
 }
 
+const listActiveOrganizationIDs = `-- name: ListActiveOrganizationIDs :many
+SELECT id FROM organizations
+WHERE status = 'active'
+ORDER BY created_at ASC
+LIMIT $1::bigint
+`
+
+// Background maintenance jobs enumerate tenants and then run tenant-scoped work
+// inside each organization's own transaction.
+func (q *Queries) ListActiveOrganizationIDs(ctx context.Context, rowLimit int64) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listActiveOrganizationIDs, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const organizationSlugExists = `-- name: OrganizationSlugExists :one
 SELECT EXISTS (
     SELECT 1 FROM organizations WHERE slug = $1

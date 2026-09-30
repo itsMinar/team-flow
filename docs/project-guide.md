@@ -6,7 +6,7 @@ This document explains what TeamFlow can do today, how its parts fit together, h
 
 TeamFlow is a Go backend for a multi-tenant team and project-management SaaS product. It is designed for multiple organizations to share one deployment and database while keeping organization data isolated.
 
-The project is currently an API foundation with nine completed phases:
+The project is currently an API foundation with ten completed phases:
 
 1. Foundation and infrastructure
 2. Authentication and session security
@@ -17,16 +17,18 @@ The project is currently an API foundation with nine completed phases:
 7. Tasks, assignment, statuses, priorities, due dates, and task activity
 8. Invitations, hashed single-use tokens, expiration, acceptance, and email
 9. API keys, one-time display, hashing, authentication, expiration, and revocation
+10. Background jobs: Redis queue, worker pool, retries, backoff, dead letters
 
 The codebase is a modular monolith. It has one repository and two executable processes:
 
 - `cmd/api`: HTTP API server
-- `cmd/worker`: background-worker process scaffold
+- `cmd/worker`: background worker that processes the job queue
 
 The current release is useful for building and testing secure SaaS foundations. It can create users and organizations, authenticate users, manage memberships, enforce tenant boundaries,
 and manage organization teams, projects, and tasks. Organization invitations let
-new people join an existing organization with a chosen role, and API keys let
-automation call the API on behalf of one user in one organization.
+new people join an existing organization with a chosen role, API keys let
+automation call the API on behalf of one user in one organization, and
+asynchronous work runs in a separate worker process.
 
 ## 2. What You Can Do Today
 
@@ -134,16 +136,36 @@ automation call the API on behalf of one user in one organization.
 - Record last usage, at most once a minute per key.
 - Reject invalid, expired, and revoked keys identically.
 
+### Background jobs
+
+- Queue work in Redis Streams with a consumer group and deliver it at least once.
+- Encrypt job payloads with AES-GCM before they are written to Redis.
+- Retry failed jobs with exponential backoff and jitter up to
+  `WORKER_MAX_ATTEMPTS` attempts.
+- Move exhausted or permanently rejected jobs to a dead-letter stream with the
+  last error recorded.
+- Run a configurable pool of consumers, reclaiming work abandoned by a crashed
+  worker after `WORKER_STALE_AFTER`.
+- Drain the in-flight job on shutdown within `WORKER_SHUTDOWN_TIMEOUT`.
+- Deliver invitation emails out of the request path, recording that delivery
+  happened.
+- Re-queue invitations that never reached the queue, rotating their token so the
+  previously issued link stays invalid.
+- Sweep API keys that expired more than 30 days ago.
+
 ### Operations and reliability
 
 - Liveness endpoint for process checks.
 - Readiness endpoint that checks PostgreSQL and Redis.
-- Structured JSON logs using Go's `slog`.
+- Structured JSON logs using Go's `slog`, including one line per job with its id,
+  type, attempt, and outcome.
 - Request IDs through the `X-Request-ID` header and request context.
 - Recovery, logging, security-header, and request-body-size middleware.
 - Graceful API shutdown on `SIGINT` and `SIGTERM`.
 - PostgreSQL connection pooling through `pgxpool`.
-- Redis connectivity for the API and worker dependency graph.
+- Redis connectivity for the API and worker dependency graph, and the job queue
+  built on it.
+- The worker fails fast when PostgreSQL or Redis is unavailable.
 - Reproducible local infrastructure through Docker Compose.
 
 ## 3. Current HTTP API
@@ -525,6 +547,7 @@ Handlers decode requests and write responses. Services contain business rules an
 | `internal/httpx`         | JSON envelopes, decoding, typed errors, and client-safe error mapping.            |
 | `internal/apikeys`       | API key creation, revocation, listing, and key authentication.                 |
 | `internal/invitations`   | Invitation creation, resend, revocation, preview, and acceptance.                |
+| `internal/jobs`          | Redis job queue, payload encryption, worker pool, retries, dead letters.          |
 | `internal/mailer`        | Transactional email sender interface and transports.                            |
 | `internal/middleware`    | Shared HTTP middleware.                                                           |
 | `internal/observability` | Structured logging and request ID support.                                        |
@@ -538,7 +561,7 @@ Handlers decode requests and write responses. Services contain business rules an
 ```text
 cmd/
   api/main.go              API entrypoint and graceful shutdown
-  worker/main.go           Worker entrypoint; job processing is planned
+  worker/main.go           Worker entrypoint, handler registration, and shutdown
 
 internal/
   api/                     Router wiring
@@ -634,7 +657,18 @@ In a second terminal:
 make worker
 ```
 
-The worker currently connects to PostgreSQL and Redis, logs that it is ready, and waits for shutdown. Actual background-job processing is planned for a later phase.
+The worker connects to PostgreSQL and Redis, then consumes the job queue until it
+receives a shutdown signal. Set `MAIL_TRANSPORT` for the worker too: it is the
+process that actually sends invitation email, while the API only queues the job.
+
+Inspect the queue with `redis-cli`:
+
+```bash
+redis-cli XLEN  teamflow:jobs:stream
+redis-cli XPENDING teamflow:jobs:stream teamflow-workers
+redis-cli ZCARD  teamflow:jobs:retry
+redis-cli XLEN  teamflow:jobs:dead
+```
 
 ### Run everything in Docker
 
@@ -686,6 +720,14 @@ Configuration is loaded from environment variables at startup. Invalid configura
 | `JWT_REFRESH_TTL`             | `720h`        | Refresh-token lifetime and must exceed access TTL.                    |
 | `API_KEY_DEFAULT_TTL`         | `2160h`      | API key lifetime when a request does not specify one.     |
 | `API_KEY_MAX_TTL`             | `8760h`      | Maximum API key lifetime; keys never outlive this bound.   |
+| `WORKER_CONCURRENCY`         | `4`         | Size of the background worker pool.                        |
+| `WORKER_BLOCK_TIMEOUT`        | `2s`        | How long a consumer blocks waiting for work.               |
+| `WORKER_STALE_AFTER`          | `5m`        | Idle time before another worker may reclaim a job.         |
+| `WORKER_SHUTDOWN_TIMEOUT`     | `15s`       | How long shutdown waits for the in-flight job.             |
+| `WORKER_MAX_ATTEMPTS`         | `5`         | Attempts before a job is dead-lettered.                    |
+| `WORKER_RETRY_BASE_DELAY`     | `30s`       | First retry delay; doubles per attempt.                    |
+| `WORKER_RETRY_MAX_DELAY`      | `1h`        | Upper bound on the retry delay.                            |
+| `JOB_ENCRYPTION_KEY`          | derived     | Encrypts job payloads in Redis; derived from `JWT_SECRET`. |
 | `INVITATION_BASE_URL`         | `http://localhost:3000` | Public origin of the client that renders the accept page.  |
 | `INVITATION_TTL`              | `168h`        | Invitation lifetime; must be positive and at most 720h.             |
 | `MAIL_TRANSPORT`              | `log`        | Transactional mail transport: `log` or `none`.                     |
@@ -730,6 +772,8 @@ The current migrations cover:
   membership foreign keys, indexes, and RLS
 - Invitations with hashed single-use tokens, a composite role foreign key, a
   one-pending-invitation-per-email constraint, and RLS
+- Invitation delivery bookkeeping (`notified_at`, `delivery_attempts`) for the
+  redelivery sweep
 - API keys with hashed storage, a composite creator-membership foreign key, and
   RLS
 
@@ -785,6 +829,25 @@ Organization creation is atomic: the organization, default roles, and Owner memb
 - Security headers are added by middleware.
 - Internal database and implementation details are logged server-side but not returned to clients.
 
+### Background jobs
+
+- The queue is Redis Streams with a consumer group, providing at-least-once
+  delivery, explicit acknowledgement, a pending-entries list, and reclaiming of
+  abandoned work.
+- Job payloads are encrypted with AES-GCM. A payload can carry a credential, such
+  as the one-time token in an invitation email, so an unencrypted mode is not
+  offered.
+- Retries use exponential backoff with jitter; delayed work is held in a sorted
+  set and promoted by the workers rather than by sleeping a process.
+- Delivery is at least once, so handlers must be idempotent. A reclaimed job runs
+  again.
+- Handlers run detached from the shutdown signal so a job in flight finishes,
+  bounded by `WORKER_SHUTDOWN_TIMEOUT`.
+- Maintenance jobs enumerate active organizations and open a tenant transaction
+  per organization, so a sweep cannot cross tenants.
+- Statuses are always derived on read, so a missed or paused sweep never serves
+  stale data.
+
 ### Authorization
 
 - Permissions are stored in PostgreSQL and assigned to organization-scoped roles.
@@ -828,6 +891,17 @@ make lint
 ```
 
 The test suite covers configuration validation, middleware, health checks, HTTP routing, validation, password rules, JWT behavior, refresh-token rotation, token reuse, logout behavior, authentication handlers, organization services, RBAC permission mapping and validation, team validation, project validation and filtering, project activity, authorization, tenant-scoped workflows, RLS, and tenant isolation.
+
+### Background job tests
+
+```bash
+export TEST_REDIS_URL='redis://localhost:6379/15'
+go test -race -count=1 ./internal/jobs
+unset TEST_REDIS_URL
+```
+
+Queue tests are skipped when `TEST_REDIS_URL` is unset. They delete only the
+`teamflow:jobs:*` keys, so a development Redis can be used.
 
 ### Database integration tests
 
@@ -919,8 +993,6 @@ The container API publishes port `8080`. Stop it before `make dev`, or set a dif
 
 The following capabilities are planned and should not be assumed to exist yet:
 
-- Actual background-job processing
-- Redis-backed rate limiting
 - Audit and activity logging
 - Metrics and optional tracing
 - Further production hardening
@@ -936,7 +1008,7 @@ The planned roadmap is:
 7. Tasks - complete
 8. Invitations - complete
 9. API keys - complete
-10. Background jobs - planned
+10. Background jobs - complete
 11. Rate limiting - planned
 12. Audit and observability - planned
 13. Testing expansion - planned
@@ -950,8 +1022,8 @@ A practical order for continuing the project is:
 
 1. Add membership management: suspend and remove members, and resend credentials.
 2. Add key rotation and per-key scopes, then comments, task watchers, and labels.
-3. Add background jobs for email delivery, notifications, and other asynchronous
-   work, replacing the log mail transport.
+3. Add a real email transport so the queued invitation mail leaves the process,
+   and enqueue notifications and other asynchronous work on the same queue.
 4. Add rate limiting and audit events before exposing the API publicly.
 5. Expand OpenAPI or Postman documentation as each endpoint is added.
 6. Add production deployment configuration, secret management, metrics, tracing, backups, and migration runbooks.

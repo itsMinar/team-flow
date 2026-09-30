@@ -45,6 +45,10 @@ type Querier interface {
 	// Used to reject inviting someone who is already part of the organization.
 	GetActiveMembershipByEmail(ctx context.Context, arg GetActiveMembershipByEmailParams) (OrganizationMembership, error)
 	GetInvitationByID(ctx context.Context, arg GetInvitationByIDParams) (Invitation, error)
+	// Resolves an invitation's organization from an id that came from the job queue
+	// rather than from a request, so the worker can open a tenant transaction for
+	// it. It is never used to serve client input.
+	GetInvitationByIDForJob(ctx context.Context, id uuid.UUID) (GetInvitationByIDForJobRow, error)
 	GetInvitationByIDForUpdate(ctx context.Context, arg GetInvitationByIDForUpdateParams) (Invitation, error)
 	GetInvitationByTokenHash(ctx context.Context, tokenHash string) (Invitation, error)
 	GetInvitationByTokenHashForUpdate(ctx context.Context, tokenHash string) (Invitation, error)
@@ -67,7 +71,13 @@ type Querier interface {
 	HasRolePermission(ctx context.Context, arg HasRolePermissionParams) (bool, error)
 	// Sort keys are fixed CASE branches, so client input never becomes SQL.
 	ListAPIKeys(ctx context.Context, arg ListAPIKeysParams) ([]ApiKey, error)
+	// Background maintenance jobs enumerate tenants and then run tenant-scoped work
+	// inside each organization's own transaction.
+	ListActiveOrganizationIDs(ctx context.Context, rowLimit int64) ([]uuid.UUID, error)
 	ListActivityByResource(ctx context.Context, arg ListActivityByResourceParams) ([]ActivityLog, error)
+	// Expired keys that have been dead long enough to be worth revoking. The grace
+	// period keeps recently expired keys visible for an operator to review.
+	ListExpiredAPIKeys(ctx context.Context, arg ListExpiredAPIKeysParams) ([]ApiKey, error)
 	// Sort keys are fixed CASE branches, so client input never becomes SQL.
 	ListInvitations(ctx context.Context, arg ListInvitationsParams) ([]Invitation, error)
 	ListMembersByOrganization(ctx context.Context, organizationID uuid.UUID) ([]ListMembersByOrganizationRow, error)
@@ -80,14 +90,23 @@ type Querier interface {
 	ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, error)
 	ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]ListTeamMembersRow, error)
 	ListTeams(ctx context.Context, organizationID uuid.UUID) ([]Team, error)
+	ListUndeliveredInvitations(ctx context.Context, arg ListUndeliveredInvitationsParams) ([]Invitation, error)
 	MarkInvitationExpired(ctx context.Context, arg MarkInvitationExpiredParams) (Invitation, error)
+	// Records that the invitation email reached a transport.
+	MarkInvitationNotified(ctx context.Context, arg MarkInvitationNotifiedParams) error
 	OrganizationSlugExists(ctx context.Context, slug string) (bool, error)
 	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) (ApiKey, error)
+	RevokeAPIKeyByID(ctx context.Context, arg RevokeAPIKeyByIDParams) error
 	RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error
 	RevokeInvitation(ctx context.Context, arg RevokeInvitationParams) (Invitation, error)
 	RevokeRefreshToken(ctx context.Context, arg RevokeRefreshTokenParams) error
 	RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID) error
+	// The redelivery sweep issues a fresh token for an invitation that was never
+	// queued. Rotating invalidates the previous link, which is safe because it was
+	// never delivered, and increments the attempt counter so a permanently failing
+	// transport is not retried forever.
+	RotateInvitationForDelivery(ctx context.Context, arg RotateInvitationForDeliveryParams) (Invitation, error)
 	// Resending reuses the pending invitation and issues a fresh token, so the
 	// previous link stops working immediately.
 	RotateInvitationToken(ctx context.Context, arg RotateInvitationTokenParams) (Invitation, error)

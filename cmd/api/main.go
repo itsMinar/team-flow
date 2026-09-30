@@ -22,6 +22,7 @@ import (
 	"github.com/itsMinar/team-flow/internal/database"
 	"github.com/itsMinar/team-flow/internal/health"
 	"github.com/itsMinar/team-flow/internal/invitations"
+	"github.com/itsMinar/team-flow/internal/jobs"
 	"github.com/itsMinar/team-flow/internal/mailer"
 	"github.com/itsMinar/team-flow/internal/observability"
 	"github.com/itsMinar/team-flow/internal/organizations"
@@ -29,6 +30,17 @@ import (
 	"github.com/itsMinar/team-flow/internal/tasks"
 	"github.com/itsMinar/team-flow/internal/teams"
 )
+
+// jobEncryptionKey returns the key protecting job payloads at rest in Redis.
+// JOB_ENCRYPTION_KEY is preferred; when it is absent the key is derived from the
+// JWT secret so a working setup needs no extra configuration, at the cost of
+// rotating both together.
+func jobEncryptionKey(cfg *config.Config) string {
+	if cfg.Jobs.EncryptionKey != "" {
+		return cfg.Jobs.EncryptionKey
+	}
+	return "jwt/" + cfg.JWT.Secret
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -88,15 +100,25 @@ func run() error {
 	taskService := tasks.NewService(db.Pool, orgService)
 	taskHandler := tasks.NewHandler(taskService, logger)
 
-	// Invitation email: the log transport is for local development and tests.
-	// Phase 10 adds the queued sender used in production.
+	// Invitation email is delivered by the worker: the API only queues the job.
+	// The transport itself is configured per process; the log transport is for
+	// local development and is rejected in production.
 	var mailSender mailer.Sender = mailer.NewLogSender(logger)
 	if cfg.Mail.Transport == config.MailTransportNone {
 		mailSender = mailer.DiscardSender{}
 		logger.Warn("mail transport disabled; invitations will not be delivered")
 	}
+	jobQueue, err := jobs.NewQueue(redisClient.Client, jobs.Options{
+		EncryptionKey:  jobEncryptionKey(cfg),
+		MaxAttempts:    cfg.Jobs.MaxAttempts,
+		RetryBaseDelay: cfg.Jobs.RetryBaseDelay,
+		RetryMaxDelay:  cfg.Jobs.RetryMaxDelay,
+	})
+	if err != nil {
+		return fmt.Errorf("build job queue: %w", err)
+	}
 	invitationService := invitations.NewService(db.Pool, orgService, authService,
-		mailSender, cfg.Invite.TTL, cfg.Invite.BaseURL, logger)
+		mailSender, jobQueue, cfg.Invite.TTL, cfg.Invite.BaseURL, logger)
 	invitationHandler := invitations.NewHandler(invitationService, logger)
 
 	apiKeyService := apikeys.NewService(db.Pool, orgService, cfg.APIKey.DefaultTTL, cfg.APIKey.MaxTTL, logger)

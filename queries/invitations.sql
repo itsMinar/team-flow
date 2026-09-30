@@ -83,3 +83,37 @@ JOIN users u ON u.id = m.user_id
 WHERE m.organization_id = sqlc.arg('organization_id')
   AND u.email = sqlc.arg('email')
   AND m.status = 'active';
+-- name: MarkInvitationNotified :exec
+-- Records that the invitation email reached a transport.
+UPDATE invitations
+SET notified_at = now()
+WHERE id = sqlc.arg('id') AND organization_id = sqlc.arg('organization_id');
+
+-- name: RotateInvitationForDelivery :one
+-- The redelivery sweep issues a fresh token for an invitation that was never
+-- queued. Rotating invalidates the previous link, which is safe because it was
+-- never delivered, and increments the attempt counter so a permanently failing
+-- transport is not retried forever.
+UPDATE invitations
+SET token_hash = sqlc.arg('token_hash'),
+    delivery_attempts = delivery_attempts + 1
+WHERE id = sqlc.arg('id') AND organization_id = sqlc.arg('organization_id')
+  AND status = 'pending' AND notified_at IS NULL
+RETURNING *;
+
+-- name: ListUndeliveredInvitations :many
+SELECT * FROM invitations
+WHERE status = 'pending'
+  AND notified_at IS NULL
+  AND delivery_attempts = sqlc.arg('max_attempts_comparison')::int
+  AND created_at < sqlc.arg('created_before')
+  AND organization_id = sqlc.arg('organization_id')
+ORDER BY created_at ASC
+LIMIT sqlc.arg('row_limit')::bigint;
+
+-- name: GetInvitationByIDForJob :one
+-- Resolves an invitation's organization from an id that came from the job queue
+-- rather than from a request, so the worker can open a tenant transaction for
+-- it. It is never used to serve client input.
+SELECT id, organization_id FROM invitations
+WHERE id = sqlc.arg('id');

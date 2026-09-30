@@ -39,6 +39,8 @@ type Config struct {
 	Invite   InvitationConfig
 	Mail     MailConfig
 	APIKey   APIKeyConfig
+	Worker   WorkerConfig
+	Jobs     JobsConfig
 }
 
 // AppConfig holds general application settings.
@@ -100,6 +102,25 @@ type APIKeyConfig struct {
 	MaxTTL     time.Duration
 }
 
+// WorkerConfig holds background worker settings: the size of the worker pool, how
+// long a claim may sit unacknowledged before another worker may steal it, and
+// how long shutdown waits for in-flight jobs.
+type WorkerConfig struct {
+	Concurrency     int
+	BlockTimeout    time.Duration
+	StaleAfter      time.Duration
+	ShutdownTimeout time.Duration
+}
+
+// JobsConfig holds queue settings: the per-job retry policy and the key used to
+// encrypt job payloads at rest in Redis.
+type JobsConfig struct {
+	MaxAttempts    int
+	RetryBaseDelay time.Duration
+	RetryMaxDelay  time.Duration
+	EncryptionKey  string
+}
+
 // Mail transports. The log transport writes invitation links to the
 // application log, which is only acceptable outside production.
 const (
@@ -158,6 +179,18 @@ func Load() (*Config, error) {
 		APIKey: APIKeyConfig{
 			DefaultTTL: getEnvDuration("API_KEY_DEFAULT_TTL", 90*24*time.Hour),
 			MaxTTL:     getEnvDuration("API_KEY_MAX_TTL", 365*24*time.Hour),
+		},
+		Worker: WorkerConfig{
+			Concurrency:     getEnvInt("WORKER_CONCURRENCY", 4),
+			BlockTimeout:    getEnvDuration("WORKER_BLOCK_TIMEOUT", 2*time.Second),
+			StaleAfter:      getEnvDuration("WORKER_STALE_AFTER", 5*time.Minute),
+			ShutdownTimeout: getEnvDuration("WORKER_SHUTDOWN_TIMEOUT", 15*time.Second),
+		},
+		Jobs: JobsConfig{
+			MaxAttempts:    getEnvInt("WORKER_MAX_ATTEMPTS", 5),
+			RetryBaseDelay: getEnvDuration("WORKER_RETRY_BASE_DELAY", 30*time.Second),
+			RetryMaxDelay:  getEnvDuration("WORKER_RETRY_MAX_DELAY", time.Hour),
+			EncryptionKey:  getEnv("JOB_ENCRYPTION_KEY", ""),
 		},
 		Invite: InvitationConfig{
 			TTL:     getEnvDuration("INVITATION_TTL", 168*time.Hour),
@@ -218,6 +251,28 @@ func (c *Config) validate() error {
 	}
 	if err := validateAbsoluteURL("INVITATION_BASE_URL", c.Invite.BaseURL); err != nil {
 		problems = append(problems, err.Error())
+	}
+
+	if c.Worker.Concurrency < 1 {
+		problems = append(problems, "WORKER_CONCURRENCY must be at least 1")
+	}
+	if c.Worker.BlockTimeout <= 0 {
+		problems = append(problems, "WORKER_BLOCK_TIMEOUT must be positive")
+	}
+	if c.Worker.StaleAfter <= 0 {
+		problems = append(problems, "WORKER_STALE_AFTER must be positive")
+	}
+	if c.Worker.ShutdownTimeout <= 0 {
+		problems = append(problems, "WORKER_SHUTDOWN_TIMEOUT must be positive")
+	}
+	if c.Jobs.MaxAttempts < 1 {
+		problems = append(problems, "WORKER_MAX_ATTEMPTS must be at least 1")
+	}
+	if c.Jobs.RetryBaseDelay <= 0 {
+		problems = append(problems, "WORKER_RETRY_BASE_DELAY must be positive")
+	}
+	if c.Jobs.RetryMaxDelay < c.Jobs.RetryBaseDelay {
+		problems = append(problems, "WORKER_RETRY_MAX_DELAY must be greater than or equal to WORKER_RETRY_BASE_DELAY")
 	}
 
 	if c.APIKey.DefaultTTL <= 0 {
