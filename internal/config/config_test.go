@@ -155,3 +155,44 @@ func TestLoad_RejectsLogMailTransportInProduction(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 }
+
+func TestLoad_APIKeyDefaults(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/db")
+	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("JWT_SECRET", "a-sufficiently-long-local-secret")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.APIKey.DefaultTTL != 90*24*time.Hour || cfg.APIKey.MaxTTL != 365*24*time.Hour {
+		t.Fatalf("unexpected API key TTLs: %+v", cfg.APIKey)
+	}
+}
+
+func TestLoad_RejectsInvalidAPIKeyConfig(t *testing.T) {
+	cases := []struct {
+		name   string
+		key    string
+		value  string
+		second string
+	}{
+		{name: "zero default ttl", key: "API_KEY_DEFAULT_TTL", value: "0s"},
+		{name: "negative max ttl", key: "API_KEY_MAX_TTL", value: "-1h"},
+		{name: "max below default", key: "API_KEY_DEFAULT_TTL", value: "720h", second: "24h"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "postgres://localhost/db")
+			t.Setenv("REDIS_URL", "redis://localhost:6379")
+			t.Setenv("JWT_SECRET", "a-sufficiently-long-local-secret")
+			t.Setenv(test.key, test.value)
+			if test.second != "" {
+				t.Setenv("API_KEY_MAX_TTL", test.second)
+			}
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() expected an error for %s=%s", test.key, test.value)
+			}
+		})
+	}
+}

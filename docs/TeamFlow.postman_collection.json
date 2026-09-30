@@ -119,6 +119,18 @@
       "value": "",
       "type": "string",
       "description": "Copy the token from the emailed accept link (or the log sender output in local development). Never committed or exposed by the API."
+    },
+    {
+      "key": "api_key",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by Create API Key. Shown once; the API cannot return it again."
+    },
+    {
+      "key": "api_key_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by Create API Key; used by Revoke API Key."
     }
   ],
   "event": [
@@ -900,6 +912,98 @@
             },
             "url": "{{base_url}}/api/v1/invitations/accept",
             "description": "Accepts an invitation as the signed-in user. The access token's email must match the invited address. Returns a new session for the joined organization."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "API Keys",
+      "item": [
+        {
+          "name": "Create API Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"CI pipeline\",\n  \"expires_in_days\": 30\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/api-keys",
+            "description": "Creates an API key for the caller. Requires api_keys.manage. The response contains the secret exactly once; store it in the api_key variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json().data;",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('api_key', body.key);",
+                  "    pm.collectionVariables.set('api_key_id', body.api_key.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "List API Keys",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/api-keys?page=1&page_size=20&include_revoked=true&sort=created_at&order=desc",
+            "description": "Lists API keys with identifiers only. Requires api_keys.manage."
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke API Key",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/api-keys/{{api_key_id}}",
+            "description": "Revokes an API key immediately. Requires api_keys.manage."
+          },
+          "response": []
+        },
+        {
+          "name": "List Projects With API Key",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "header": [
+              {"key": "X-API-Key", "value": "{{api_key}}"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects?page=1&page_size=20",
+            "description": "Reads projects using the API key instead of a bearer token. A key only works on routes under the organization it was created in."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Project With API Key",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "POST",
+            "header": [
+              {"key": "X-API-Key", "value": "{{api_key}}"},
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Created by the CI pipeline\",\n  \"priority\": \"medium\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects",
+            "description": "Writes as the key's creator, using that user's current role and permissions. Fails with 401 after the key is revoked or expires, or on any other organization."
           },
           "response": []
         }

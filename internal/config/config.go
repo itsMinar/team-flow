@@ -38,6 +38,7 @@ type Config struct {
 	JWT      JWTConfig
 	Invite   InvitationConfig
 	Mail     MailConfig
+	APIKey   APIKeyConfig
 }
 
 // AppConfig holds general application settings.
@@ -89,6 +90,14 @@ type JWTConfig struct {
 type InvitationConfig struct {
 	TTL     time.Duration
 	BaseURL string
+}
+
+// APIKeyConfig bounds how long a minted API key can stay valid. An API key is a
+// long-lived credential with no rotation, so it is always given an expiry and
+// the lifetime is capped.
+type APIKeyConfig struct {
+	DefaultTTL time.Duration
+	MaxTTL     time.Duration
 }
 
 // Mail transports. The log transport writes invitation links to the
@@ -145,6 +154,10 @@ func Load() (*Config, error) {
 		},
 		Mail: MailConfig{
 			Transport: strings.ToLower(getEnv("MAIL_TRANSPORT", MailTransportLog)),
+		},
+		APIKey: APIKeyConfig{
+			DefaultTTL: getEnvDuration("API_KEY_DEFAULT_TTL", 90*24*time.Hour),
+			MaxTTL:     getEnvDuration("API_KEY_MAX_TTL", 365*24*time.Hour),
 		},
 		Invite: InvitationConfig{
 			TTL:     getEnvDuration("INVITATION_TTL", 168*time.Hour),
@@ -205,6 +218,16 @@ func (c *Config) validate() error {
 	}
 	if err := validateAbsoluteURL("INVITATION_BASE_URL", c.Invite.BaseURL); err != nil {
 		problems = append(problems, err.Error())
+	}
+
+	if c.APIKey.DefaultTTL <= 0 {
+		problems = append(problems, "API_KEY_DEFAULT_TTL must be positive")
+	}
+	if c.APIKey.MaxTTL <= 0 {
+		problems = append(problems, "API_KEY_MAX_TTL must be positive")
+	}
+	if c.APIKey.MaxTTL < c.APIKey.DefaultTTL {
+		problems = append(problems, "API_KEY_MAX_TTL must be greater than or equal to API_KEY_DEFAULT_TTL")
 	}
 
 	switch c.Mail.Transport {

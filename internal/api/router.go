@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/itsMinar/team-flow/internal/apikeys"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/health"
@@ -35,6 +36,7 @@ type Dependencies struct {
 	Projects     *projects.Handler
 	Tasks        *tasks.Handler
 	Invitations  *invitations.Handler
+	APIKeys      *apikeys.Handler
 }
 
 // NewRouter builds the top-level HTTP handler with the standard middleware
@@ -74,6 +76,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		}
 		if deps.Invitations != nil && deps.AuthMW != nil {
 			deps.Invitations.RegisterRoutes(r, deps.AuthMW)
+		}
+		if deps.APIKeys != nil && deps.AuthMW != nil {
+			deps.APIKeys.RegisterRoutes(r, deps.AuthMW)
 		}
 	})
 

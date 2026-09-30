@@ -17,13 +17,31 @@ const (
 	tenantKey
 )
 
-// Principal is the authenticated identity derived from a validated access
-// token. It intentionally holds only identifiers; roles and permissions are
-// resolved from the database when needed rather than trusted from the token.
+// Authentication methods a principal can be derived from.
+const (
+	MethodBearer = "bearer"
+	MethodAPIKey = "api_key"
+)
+
+// Principal is the authenticated identity derived from a validated credential.
+// It intentionally holds only identifiers; roles and permissions are resolved
+// from the database when needed rather than trusted from the token.
 type Principal struct {
 	UserID  uuid.UUID
 	TokenID uuid.UUID
+	// Method records how the caller authenticated, so handlers and logs can tell
+	// a session apart from an API key.
+	Method string
+	// APIKeyID is set only for API-key requests.
+	APIKeyID uuid.UUID
+	// OrganizationID pins an API key to the organization it was minted in. It is
+	// uuid.Nil for bearer sessions, which may act in any organization the user
+	// belongs to.
+	OrganizationID uuid.UUID
 }
+
+// IsAPIKey reports whether the caller authenticated with an API key.
+func (p Principal) IsAPIKey() bool { return p.APIKeyID != uuid.Nil }
 
 // WithPrincipal returns a copy of ctx carrying the authenticated principal.
 func WithPrincipal(ctx context.Context, p Principal) context.Context {

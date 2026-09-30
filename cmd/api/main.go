@@ -15,6 +15,7 @@ import (
 	"log/slog"
 
 	"github.com/itsMinar/team-flow/internal/api"
+	"github.com/itsMinar/team-flow/internal/apikeys"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/cache"
 	"github.com/itsMinar/team-flow/internal/config"
@@ -76,7 +77,6 @@ func run() error {
 	jwtService := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Issuer, cfg.JWT.AccessTTL)
 	authService := auth.NewService(db.Pool, jwtService, cfg.JWT.RefreshTTL, logger)
 	authHandler := auth.NewHandler(authService, logger)
-	authMW := auth.NewMiddleware(jwtService, logger)
 
 	orgService := organizations.NewService(db.Pool, logger)
 	orgHandler := organizations.NewHandler(orgService, logger)
@@ -99,6 +99,13 @@ func run() error {
 		mailSender, cfg.Invite.TTL, cfg.Invite.BaseURL, logger)
 	invitationHandler := invitations.NewHandler(invitationService, logger)
 
+	apiKeyService := apikeys.NewService(db.Pool, orgService, cfg.APIKey.DefaultTTL, cfg.APIKey.MaxTTL, logger)
+	apiKeyHandler := apikeys.NewHandler(apiKeyService, logger)
+
+	// The middleware is built last because it authenticates both bearer tokens
+	// and API keys; every handler receives it when routes are registered.
+	authMW := auth.NewMiddleware(jwtService, logger).WithAPIKeys(apiKeyService)
+
 	router := api.NewRouter(api.Dependencies{
 		Config:       cfg,
 		Logger:       logger,
@@ -111,6 +118,7 @@ func run() error {
 		Projects:     projectHandler,
 		Tasks:        taskHandler,
 		Invitations:  invitationHandler,
+		APIKeys:      apiKeyHandler,
 	})
 
 	srv := &http.Server{

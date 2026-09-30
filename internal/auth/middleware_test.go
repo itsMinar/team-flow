@@ -1,13 +1,17 @@
 package auth
 
 import (
+	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
@@ -122,5 +126,151 @@ func TestOptionalAuth(t *testing.T) {
 				t.Fatalf("status = %d, want 204", recorder.Code)
 			}
 		})
+	}
+}
+
+// stubAPIKeys is a minimal APIKeyAuthenticator for middleware tests.
+type stubAPIKeys struct {
+	principal authctx.Principal
+	err       error
+	calls     int
+	keys      []string
+}
+
+func (s *stubAPIKeys) Authenticate(_ context.Context, raw string) (authctx.Principal, error) {
+	s.calls++
+	s.keys = append(s.keys, raw)
+	return s.principal, s.err
+}
+
+func newAPIKeyMiddleware(stub *stubAPIKeys) (*Middleware, uuid.UUID) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	service := NewJWTService("test-secret", "teamflow", time.Minute)
+	orgID := uuid.New()
+	stub.principal = authctx.Principal{
+		UserID:         uuid.New(),
+		Method:         authctx.MethodAPIKey,
+		APIKeyID:       uuid.New(),
+		OrganizationID: orgID,
+	}
+	return NewMiddleware(service, logger).WithAPIKeys(stub), orgID
+}
+
+func TestRequireAuthAcceptsAPIKeysOnScopedRoutes(t *testing.T) {
+	stub := &stubAPIKeys{}
+	middleware, orgID := newAPIKeyMiddleware(stub)
+	apiKey := "tfk_" + strings.Repeat("a", 43)
+
+	router := chi.NewRouter()
+	router.Route("/organizations/{orgID}/projects", func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			principal, ok := authctx.PrincipalFromContext(r.Context())
+			if !ok || !principal.IsAPIKey() || principal.OrganizationID != orgID {
+				t.Errorf("unexpected principal: %+v", principal)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/organizations/"+orgID.String()+"/projects", nil)
+	request.Header.Set(apiKeyHeader, apiKey)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (%s)", recorder.Code, recorder.Body.String())
+	}
+	if stub.calls != 1 || stub.keys[0] != apiKey {
+		t.Fatalf("authenticator was not called with the presented key: %+v", stub)
+	}
+}
+
+// An API key is pinned to one organization and may only be presented there.
+func TestRequireAuthRejectsAPIKeyOutsideItsOrganization(t *testing.T) {
+	stub := &stubAPIKeys{}
+	middleware, orgID := newAPIKeyMiddleware(stub)
+	otherOrg := uuid.New()
+
+	var principal authctx.Principal
+	handler := middleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, _ = authctx.PrincipalFromContext(r.Context())
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	router := chi.NewRouter()
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			chi.RouteContext(r.Context()).URLParams.Add("orgID", otherOrg.String())
+			next.ServeHTTP(w, r)
+		})
+	})
+	router.Get("/organizations/{orgID}/projects", handler.ServeHTTP)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/organizations/"+otherOrg.String()+"/projects", nil)
+	request.Header.Set(apiKeyHeader, "tfk_"+strings.Repeat("a", 43))
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("cross-organization key = %d, want 401", recorder.Code)
+	}
+	if principal != (authctx.Principal{}) {
+		t.Fatalf("no principal may be stored for a rejected key: %+v", principal)
+	}
+	_ = orgID
+}
+
+func TestRequireAuthRejectsInvalidAPIKey(t *testing.T) {
+	stub := &stubAPIKeys{err: errors.New("invalid or expired API key")}
+	middleware, orgID := newAPIKeyMiddleware(stub)
+
+	router := chi.NewRouter()
+	router.Route("/organizations/{orgID}/projects", func(r chi.Router) {
+		r.Use(middleware.RequireAuth)
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			t.Error("handler must not run for a rejected API key")
+		})
+	})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/organizations/"+orgID.String()+"/projects", nil)
+	request.Header.Set(apiKeyHeader, "tfk_"+strings.Repeat("b", 43))
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", recorder.Code)
+	}
+}
+
+// Without an API key authenticator configured, the header must be ignored.
+func TestRequireAuthIgnoresAPIKeyHeaderWhenNotConfigured(t *testing.T) {
+	middleware := NewMiddleware(NewJWTService("test-secret", "teamflow", time.Minute),
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler := middleware.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler must not run without a valid credential")
+	}))
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/organizations/some-org/projects", nil)
+	request.Header.Set(apiKeyHeader, "tfk_"+strings.Repeat("c", 43))
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", recorder.Code)
+	}
+}
+
+func TestOptionalAuthIgnoresInvalidAPIKey(t *testing.T) {
+	stub := &stubAPIKeys{err: errors.New("invalid")}
+	middleware, _ := newAPIKeyMiddleware(stub)
+	reached := false
+	handler := middleware.OptionalAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := authctx.PrincipalFromContext(r.Context()); ok {
+			t.Error("an invalid key must not produce a principal")
+		}
+		reached = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/invitations/accept", nil)
+	request.Header.Set(apiKeyHeader, "tfk_"+strings.Repeat("d", 43))
+	handler.ServeHTTP(recorder, request)
+	if !reached || recorder.Code != http.StatusNoContent {
+		t.Fatalf("the handler must still run: reached=%v status=%d", reached, recorder.Code)
 	}
 }

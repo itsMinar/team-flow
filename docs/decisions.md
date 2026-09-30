@@ -2,6 +2,75 @@
 
 Short records of notable engineering decisions. Newest first within each phase.
 
+## Phase 9 — API keys
+
+### A key is a credential for one (user, organization) pair, not a role
+
+An API key stores the organization it belongs to and the user who minted it, and
+nothing else. It carries no role and no permission list.
+
+The alternative designs were a key with its own role, or a key with a permission
+scope. Both add a second authorization model that must be kept consistent with the
+existing RBAC: who may grant a key an Owner or Admin role, what happens when a
+key's permissions are stale, and how a revoked membership interacts with a key
+that still carries permissions.
+
+Binding a key to a user instead means every key request resolves exactly like a
+session request: active user, active membership, live role, live permissions. It
+also inherits the properties the codebase already relies on — a demotion takes
+effect on the next request, authorization is never stale, and a removed member
+loses access instantly. The cost is that keys cannot be scoped more narrowly than
+their creator, which is why the creator must be an Owner or Admin: minting a
+credential is itself a privileged act.
+
+A composite foreign key from `(created_by, organization_id)` to
+`organization_memberships` makes this a database invariant, so removing a
+membership deletes the keys it backed instead of leaving an orphan credential.
+
+### Keys are always expiring, and never returned twice
+
+An API key is 256 bits of entropy stored only as a SHA-256 digest, with a
+12-character prefix and the last four characters stored separately so an operator
+can identify a key in code without the secret being derivable.
+
+There is deliberately no non-expiring key: `API_KEY_DEFAULT_TTL` applies when a
+request does not ask for a lifetime, and `API_KEY_MAX_TTL` caps what a caller may
+ask for. A credential that never expires is a permanent hole in the
+organization, and rotating one is a manual task nobody schedules.
+
+The secret is returned only by the creation response. Revoking is the only remedy
+otherwise, since the stored hash cannot be reversed — which is the intended
+trade-off and why the response carries an explicit warning.
+
+### Authentication stays in one middleware, with the key pinned to its organization
+
+`auth.Middleware` gained an `APIKeyAuthenticator` interface rather than a
+dependency on the API key package, so credential resolution stays free of import
+cycles and can be tested with a stub. `RequireAuth` now resolves a bearer token
+first and then an API key, so every organization-scoped route accepts either
+credential without per-feature changes.
+
+The middleware enforces the organization pin itself, by comparing the key's
+organization with the `{orgID}` path parameter and rejecting the request when
+they differ or when the route is not organization-scoped. Doing this in the
+middleware rather than in each service means a new feature cannot accidentally
+accept a key in the wrong tenant, and it keeps `organizations.Service.Authorize`
+unchanged.
+
+Keys are refused on `/auth/me` and `/api/v1/organizations` for the same reason: a
+key is an organization credential, not a session, and those routes are not.
+
+### Failures are uniform and usage recording is throttled
+
+An unknown, expired, or revoked key all produce the same `401`, so a caller
+cannot probe which keys exist. The service-level error code is `INVALID_API_KEY`;
+at the HTTP boundary it surfaces as the standard `UNAUTHORIZED`, matching how a
+bad bearer token is reported.
+
+`last_used_at` is written by a single statement guarded to fire at most once a
+minute per key. Recording usage on every authenticated request would double the
+write load of read traffic for a field that only needs to be roughly accurate.
+
 ## Phase 8 — Invitations
 
 ### Invitation tokens are hashed, single use, and never returned by the API

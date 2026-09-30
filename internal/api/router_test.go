@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/itsMinar/team-flow/internal/apikeys"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/health"
@@ -95,6 +96,7 @@ func TestRouter_TenantModulesRequireAuth(t *testing.T) {
 		Projects:     projects.NewHandler(nil, logger),
 		Tasks:        tasks.NewHandler(nil, logger),
 		Invitations:  invitations.NewHandler(nil, logger),
+		APIKeys:      apikeys.NewHandler(nil, logger),
 	})
 	orgID := uuid.NewString()
 	for _, path := range []string{
@@ -110,6 +112,8 @@ func TestRouter_TenantModulesRequireAuth(t *testing.T) {
 		"/api/v1/organizations/" + orgID + "/invitations",
 		"/api/v1/organizations/" + orgID + "/invitations/" + uuid.NewString() + "/resend",
 		"/api/v1/organizations/" + orgID + "/invitations/" + uuid.NewString() + "/revoke",
+		"/api/v1/organizations/" + orgID + "/api-keys",
+		"/api/v1/organizations/" + orgID + "/api-keys/" + uuid.NewString(),
 	} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

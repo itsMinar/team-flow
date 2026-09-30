@@ -14,12 +14,14 @@ type Querier interface {
 	AcceptInvitation(ctx context.Context, arg AcceptInvitationParams) (Invitation, error)
 	AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error
 	AddTeamMember(ctx context.Context, arg AddTeamMemberParams) (TeamMember, error)
+	CountAPIKeys(ctx context.Context, arg CountAPIKeysParams) (int64, error)
 	CountActiveOwners(ctx context.Context, organizationID uuid.UUID) (int64, error)
 	CountActivityByResource(ctx context.Context, arg CountActivityByResourceParams) (int64, error)
 	CountInvitations(ctx context.Context, arg CountInvitationsParams) (int64, error)
 	CountMembershipsByRole(ctx context.Context, arg CountMembershipsByRoleParams) (int64, error)
 	CountProjects(ctx context.Context, arg CountProjectsParams) (int64, error)
 	CountTasks(ctx context.Context, arg CountTasksParams) (int64, error)
+	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateActivityLog(ctx context.Context, arg CreateActivityLogParams) error
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateMembership(ctx context.Context, arg CreateMembershipParams) (OrganizationMembership, error)
@@ -35,6 +37,11 @@ type Querier interface {
 	DeleteRole(ctx context.Context, arg DeleteRoleParams) error
 	DeleteTask(ctx context.Context, arg DeleteTaskParams) error
 	DeleteTeam(ctx context.Context, arg DeleteTeamParams) error
+	// Authentication resolves a key by hash before a tenant is known, so this lookup
+	// runs without an RLS tenant context, exactly like the login lookup by email.
+	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
+	GetAPIKeyByID(ctx context.Context, arg GetAPIKeyByIDParams) (ApiKey, error)
+	GetAPIKeyByIDForUpdate(ctx context.Context, arg GetAPIKeyByIDForUpdateParams) (ApiKey, error)
 	// Used to reject inviting someone who is already part of the organization.
 	GetActiveMembershipByEmail(ctx context.Context, arg GetActiveMembershipByEmailParams) (OrganizationMembership, error)
 	GetInvitationByID(ctx context.Context, arg GetInvitationByIDParams) (Invitation, error)
@@ -58,6 +65,8 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	HasRolePermission(ctx context.Context, arg HasRolePermissionParams) (bool, error)
+	// Sort keys are fixed CASE branches, so client input never becomes SQL.
+	ListAPIKeys(ctx context.Context, arg ListAPIKeysParams) ([]ApiKey, error)
 	ListActivityByResource(ctx context.Context, arg ListActivityByResourceParams) ([]ActivityLog, error)
 	// Sort keys are fixed CASE branches, so client input never becomes SQL.
 	ListInvitations(ctx context.Context, arg ListInvitationsParams) ([]Invitation, error)
@@ -74,6 +83,7 @@ type Querier interface {
 	MarkInvitationExpired(ctx context.Context, arg MarkInvitationExpiredParams) (Invitation, error)
 	OrganizationSlugExists(ctx context.Context, slug string) (bool, error)
 	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
+	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) (ApiKey, error)
 	RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error
 	RevokeInvitation(ctx context.Context, arg RevokeInvitationParams) (Invitation, error)
 	RevokeRefreshToken(ctx context.Context, arg RevokeRefreshTokenParams) error
@@ -82,6 +92,9 @@ type Querier interface {
 	// previous link stops working immediately.
 	RotateInvitationToken(ctx context.Context, arg RotateInvitationTokenParams) (Invitation, error)
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
+	// Throttled to one write per minute per key so recording usage does not double
+	// the write load of every authenticated request.
+	TouchAPIKey(ctx context.Context, id uuid.UUID) error
 	UpdateMembershipRole(ctx context.Context, arg UpdateMembershipRoleParams) (OrganizationMembership, error)
 	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
 	UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error)

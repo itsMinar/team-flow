@@ -6,7 +6,7 @@ This document explains what TeamFlow can do today, how its parts fit together, h
 
 TeamFlow is a Go backend for a multi-tenant team and project-management SaaS product. It is designed for multiple organizations to share one deployment and database while keeping organization data isolated.
 
-The project is currently an API foundation with eight completed phases:
+The project is currently an API foundation with nine completed phases:
 
 1. Foundation and infrastructure
 2. Authentication and session security
@@ -16,6 +16,7 @@ The project is currently an API foundation with eight completed phases:
 6. Projects, pagination, filtering, sorting, authorization, and activity
 7. Tasks, assignment, statuses, priorities, due dates, and task activity
 8. Invitations, hashed single-use tokens, expiration, acceptance, and email
+9. API keys, one-time display, hashing, authentication, expiration, and revocation
 
 The codebase is a modular monolith. It has one repository and two executable processes:
 
@@ -24,7 +25,8 @@ The codebase is a modular monolith. It has one repository and two executable pro
 
 The current release is useful for building and testing secure SaaS foundations. It can create users and organizations, authenticate users, manage memberships, enforce tenant boundaries,
 and manage organization teams, projects, and tasks. Organization invitations let
-new people join an existing organization with a chosen role.
+new people join an existing organization with a chosen role, and API keys let
+automation call the API on behalf of one user in one organization.
 
 ## 2. What You Can Do Today
 
@@ -114,6 +116,23 @@ new people join an existing organization with a chosen role.
   the database.
 - Refuse to invite someone who already belongs to the organization, and reserve
   inviting another Owner for Owners.
+
+### API keys
+
+- Create, list, and revoke organization API keys.
+- Show the secret exactly once, at creation, and store only its SHA-256 hash.
+- Return a 12-character prefix and the last four characters so a key can be
+  identified without exposing it.
+- Authenticate requests with the `X-API-Key` header.
+- Bind a key to one organization and one user: it authenticates as its creator
+  and only works on that organization's routes.
+- Re-resolve the creator's membership and permissions on every request, so role
+  changes and demotions take effect immediately.
+- Delete a key when its creator's membership is removed.
+- Expire every key, within a configurable default and maximum lifetime.
+- Revoke a key immediately and hide revoked keys from listings by default.
+- Record last usage, at most once a minute per key.
+- Reject invalid, expired, and revoked keys identically.
 
 ### Operations and reliability
 
@@ -377,6 +396,55 @@ invitation, `INVITATION_PENDING` (409) for a second pending invitation to the
 same address, `ALREADY_A_MEMBER` (409), `ACCOUNT_EXISTS` (409),
 `INVITATION_EMAIL_MISMATCH` (403), and `ROLE_NOT_FOUND` (404).
 
+### API key endpoints
+
+| Method   | Path                                          | Authorization     | Description                                |
+| -------- | --------------------------------------------- | ----------------- | ------------------------------------------ |
+| `GET`    | `/organizations/{orgID}/api-keys`             | `api_keys.manage` | Lists keys, excluding revoked ones.        |
+| `POST`   | `/organizations/{orgID}/api-keys`             | `api_keys.manage` | Creates a key and returns it once.         |
+| `DELETE` | `/organizations/{orgID}/api-keys/{apiKeyID}`  | `api_keys.manage` | Revokes a key immediately.                 |
+
+Key list query parameters are `page`, `page_size` (maximum 100),
+`include_revoked`, `sort` (`created_at`, `expires_at`, `last_used_at`), and
+`order`.
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/organizations/$ORG_ID/api-keys \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"CI pipeline","expires_in_days":30}'
+```
+
+The response contains `api_key` (without any secret), the one-time `key`, and a
+`warning`:
+
+```json
+{
+  "data": {
+    "api_key": {
+      "id": "0f9c...",
+      "name": "CI pipeline",
+      "key_prefix": "tfk_9Kd2mQ",
+      "key_last_four": "a91f",
+      "status": "active",
+      "expires_at": "2026-10-30T12:00:00Z"
+    },
+    "key": "tfk_9Kd2mQx...",
+    "warning": "This key is shown once. Store it now; it cannot be retrieved again."
+  }
+}
+```
+
+Use the key on any organization-scoped route:
+
+```bash
+curl -sS http://localhost:8080/api/v1/organizations/$ORG_ID/projects \
+  -H "X-API-Key: tfk_9Kd2mQx..."
+```
+
+API keys are refused on session-only routes such as `/auth/me` and on routes
+outside the organization they were created in.
+
 #### Create an organization
 
 ```bash
@@ -408,10 +476,10 @@ Role create and update requests use this shape:
 The built-in permissions are `organizations.read`, `organizations.update`,
 `members.read`, `members.manage`, `roles.read`, `roles.manage`, `teams.read`,
 `teams.manage`, `projects.read`, `projects.create`, `projects.update`,
-`projects.delete`, `tasks.read`, `tasks.create`, `tasks.update`, and
-`tasks.delete`. Owner and Admin receive all sixteen by default. Manager, Member,
-and Viewer receive read permissions, and Manager can additionally create and
-update projects and tasks. System roles are immutable, and a role with assigned
+`projects.delete`, `tasks.read`, `tasks.create`, `tasks.update`, `tasks.delete`,
+and `api_keys.manage`. Owner and Admin receive all seventeen by default.
+Manager, Member, and Viewer receive read permissions, and Manager can
+additionally create and update projects and tasks. System roles are immutable, and a role with assigned
 members cannot be deleted.
 
 ## 4. Architecture
@@ -455,6 +523,7 @@ Handlers decode requests and write responses. Services contain business rules an
 | `internal/health`        | Liveness and readiness handlers.                                                  |
 | `internal/fieldtypes`   | Shared calendar-date and partial-update field types.                              |
 | `internal/httpx`         | JSON envelopes, decoding, typed errors, and client-safe error mapping.            |
+| `internal/apikeys`       | API key creation, revocation, listing, and key authentication.                 |
 | `internal/invitations`   | Invitation creation, resend, revocation, preview, and acceptance.                |
 | `internal/mailer`        | Transactional email sender interface and transports.                            |
 | `internal/middleware`    | Shared HTTP middleware.                                                           |
@@ -483,6 +552,7 @@ internal/
   httpx/                   HTTP response and error helpers
   middleware/              Shared HTTP middleware
   observability/            JSON logging and request IDs
+  apikeys/                  API key management and authentication
   fieldtypes/               Shared calendar-date and partial-update types
   invitations/              Invitation and acceptance logic
   mailer/                   Transactional email sender and transports
@@ -614,6 +684,8 @@ Configuration is loaded from environment variables at startup. Invalid configura
 | `JWT_ISSUER`                  | `teamflow`    | JWT issuer claim.                                                     |
 | `JWT_ACCESS_TTL`              | `15m`         | Access-token lifetime.                                                |
 | `JWT_REFRESH_TTL`             | `720h`        | Refresh-token lifetime and must exceed access TTL.                    |
+| `API_KEY_DEFAULT_TTL`         | `2160h`      | API key lifetime when a request does not specify one.     |
+| `API_KEY_MAX_TTL`             | `8760h`      | Maximum API key lifetime; keys never outlive this bound.   |
 | `INVITATION_BASE_URL`         | `http://localhost:3000` | Public origin of the client that renders the accept page.  |
 | `INVITATION_TTL`              | `168h`        | Invitation lifetime; must be positive and at most 720h.             |
 | `MAIL_TRANSPORT`              | `log`        | Transactional mail transport: `log` or `none`.                     |
@@ -658,6 +730,8 @@ The current migrations cover:
   membership foreign keys, indexes, and RLS
 - Invitations with hashed single-use tokens, a composite role foreign key, a
   one-pending-invitation-per-email constraint, and RLS
+- API keys with hashed storage, a composite creator-membership foreign key, and
+  RLS
 
 ### How tenant access works
 
@@ -693,8 +767,11 @@ Organization creation is atomic: the organization, default roles, and Owner memb
 
 ### Refresh tokens
 
-- Invitation tokens use 256 bits of entropy, are stored only as SHA-256 hashes,
-  are single use, expire, and are never returned by the API.
+- Invitation tokens and API keys use 256 bits of entropy, are stored only as
+  SHA-256 hashes, expire, and are never returned by the API (an API key only in
+  its creation response).
+- API keys are pinned to one organization and one user, and their permissions are
+  re-resolved from that user's current membership on every request.
 - Tokens are generated from cryptographically secure random bytes.
 - Only SHA-256 hashes are stored.
 - Rotation is protected by a PostgreSQL row lock and transaction.
@@ -842,7 +919,6 @@ The container API publishes port `8080`. Stop it before `make dev`, or set a dif
 
 The following capabilities are planned and should not be assumed to exist yet:
 
-- API keys
 - Actual background-job processing
 - Redis-backed rate limiting
 - Audit and activity logging
@@ -859,7 +935,7 @@ The planned roadmap is:
 6. Projects - complete
 7. Tasks - complete
 8. Invitations - complete
-9. API keys - planned
+9. API keys - complete
 10. Background jobs - planned
 11. Rate limiting - planned
 12. Audit and observability - planned
@@ -873,7 +949,7 @@ Architecture decisions and the reasoning behind major security and infrastructur
 A practical order for continuing the project is:
 
 1. Add membership management: suspend and remove members, and resend credentials.
-2. Add comments, task watchers, and task labels on top of the task model.
+2. Add key rotation and per-key scopes, then comments, task watchers, and labels.
 3. Add background jobs for email delivery, notifications, and other asynchronous
    work, replacing the log mail transport.
 4. Add rate limiting and audit events before exposing the API publicly.

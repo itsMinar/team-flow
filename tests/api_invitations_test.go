@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/itsMinar/team-flow/internal/api"
+	"github.com/itsMinar/team-flow/internal/apikeys"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/health"
@@ -40,13 +41,18 @@ func newAppTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, *recording
 	cfg.HTTP.MaxBodyBytes = 1 << 20
 	cfg.Invite.BaseURL = "http://app.example.com"
 	cfg.Invite.TTL = 7 * 24 * time.Hour
+	cfg.APIKey.DefaultTTL = 90 * 24 * time.Hour
+	cfg.APIKey.MaxTTL = 365 * 24 * time.Hour
+
+	apiKeySvc := apikeys.NewService(pool, orgSvc, cfg.APIKey.DefaultTTL, cfg.APIKey.MaxTTL, logger)
+	authMW := auth.NewMiddleware(jwt, logger).WithAPIKeys(apiKeySvc)
 
 	router := api.NewRouter(api.Dependencies{
 		Config:       cfg,
 		Logger:       logger,
 		Health:       health.NewHandler(logger, map[string]health.Checker{}),
 		AuthHandler:  auth.NewHandler(authSvc, logger),
-		AuthMW:       auth.NewMiddleware(jwt, logger),
+		AuthMW:       authMW,
 		OrgHandler:   organizations.NewHandler(orgSvc, logger),
 		OrgMW:        organizations.NewMiddleware(orgSvc, logger),
 		TeamsHandler: teams.NewHandler(teams.NewService(pool, orgSvc, logger), logger),
@@ -55,6 +61,7 @@ func newAppTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, *recording
 		Invitations: invitations.NewHandler(
 			invitations.NewService(pool, orgSvc, authSvc, sender, cfg.Invite.TTL, cfg.Invite.BaseURL, logger),
 			logger),
+		APIKeys: apikeys.NewHandler(apiKeySvc, logger),
 	})
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
@@ -91,6 +98,43 @@ func doJSON(t *testing.T, srv *httptest.Server, method, path, token, body string
 
 // rawJSON issues a request without asserting the response shape, which is how
 // the token-not-in-response guarantee is checked.
+// doJSONWithKey issues a request authenticated with an API key instead of a
+// bearer token.
+func doJSONWithKey(t *testing.T, srv *httptest.Server, method, path, apiKey, body string) (int, map[string]any) {
+	t.Helper()
+	var reader io.Reader
+	if body != "" {
+		reader = bytes.NewBufferString(body)
+	}
+	req, err := http.NewRequest(method, srv.URL+path, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set(apiKeyHeader, apiKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var decoded map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decode %s %s: %v", method, path, err)
+	}
+	return resp.StatusCode, decoded
+}
+
+func mustMarshal(t *testing.T, v any) string {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
 func rawJSON(t *testing.T, srv *httptest.Server, method, path, token, body string) (int, string) {
 	t.Helper()
 	var reader io.Reader

@@ -157,6 +157,27 @@ return typed domain errors which the HTTP layer maps to status codes.
 - Unit, integration, HTTP, RLS, authorization, migration, formatting, static,
   and race checks pass before Phase 8 is marked complete.
 
+## Phase 9 Definition of Done
+
+- API keys belong to one organization and one creator, and are stored only as
+  SHA-256 hashes.
+- The secret is returned exactly once, at creation, and never appears in listings
+  or logs; a prefix and the last four characters remain visible for
+  identification.
+- Every key expires within a configurable default and maximum lifetime, and
+  non-expiring keys are not possible.
+- Requests authenticate with an API key through a dedicated header, and the key
+  is refused outside the organization it was created in.
+- A key authenticates as its creator and resolves the creator's current
+  membership and permissions on every request, so role changes take effect
+  immediately.
+- Removing the creator's membership deletes the key.
+- Keys can be listed with filtering, sorting, and pagination, revoked
+  immediately, and report last usage.
+- Managing keys requires a dedicated permission held only by Owner and Admin.
+- Unit, integration, HTTP, RLS, authorization, migration, formatting, static, and
+  race checks pass before Phase 9 is marked complete.
+
 ## Definition of Done for the Product
 
 The product is complete only when the API, worker, migrations, seed data,

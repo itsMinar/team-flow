@@ -6,7 +6,7 @@ infrastructure while their data stays strictly isolated.
 
 This repository is being built incrementally, phase by phase. **Phases 1
 (Foundation), 2 (Authentication), 3 (Multi-tenancy), 4 (RBAC), 5 (Teams), 6
-(Projects), 7 (Tasks), and 8 (Invitations) are complete.** See
+(Projects), 7 (Tasks), 8 (Invitations), and 9 (API keys) are complete.** See
 [Roadmap](#roadmap) for what is done and what comes next.
 
 ## Overview
@@ -58,6 +58,7 @@ cmd/
   worker/      Background worker entrypoint
 internal/
   api/         Router and middleware wiring
+  apikeys/     API keys and API-key authentication
   auth/        Registration, login, JWTs, refresh tokens, auth middleware
   authctx/     Authenticated principal in request context
   cache/       Redis client
@@ -68,11 +69,11 @@ internal/
   health/      Liveness and readiness handlers
   httpx/       Response envelope + typed error mapping
   invitations/ Organization invitations, acceptance, and token lifecycle
+  permissions/  Permission keys and default role grants
   mailer/      Transactional email sender interface and transports
   middleware/  Reusable HTTP middleware
   observability/ Structured logging (and later metrics/tracing)
   organizations/ Organizations, memberships, roles, and tenant resolution
-  permissions/ Permission keys and default role grants
   projects/    Organization-scoped projects and project activity
   tasks/       Project-scoped tasks, assignment, and task activity
   teams/       Organization-scoped teams and team memberships
@@ -341,6 +342,45 @@ rejected when `APP_ENV=production`, so a live invitation link can never end up
 in a production log sink. `MAIL_TRANSPORT=none` disables delivery entirely.
 Phase 10 replaces the log transport with the queued sender used in production.
 
+API keys are a second credential for server-to-server and automation calls. They
+are managed with the new `api_keys.manage` permission, which is granted to Owner
+and Admin only:
+
+| Method | Path                                                | Authorization      | Purpose                       |
+| ------ | --------------------------------------------------- | ------------------ | ----------------------------- |
+| GET    | `/organizations/{orgID}/api-keys`                   | `api_keys.manage`  | List API keys                 |
+| POST   | `/organizations/{orgID}/api-keys`                   | `api_keys.manage`  | Create an API key             |
+| DELETE | `/organizations/{orgID}/api-keys/{apiKeyID}`        | `api_keys.manage`  | Revoke an API key             |
+
+An API key authenticates a request with the `X-API-Key` header instead of a
+bearer token:
+
+```bash
+curl -sS http://localhost:8080/api/v1/organizations/$ORG_ID/projects \
+  -H "X-API-Key: tfk_your_key_here"
+```
+
+Key properties:
+
+- **One-time display.** The secret appears only in the creation response; only
+  its SHA-256 hash is stored. Listings return a 12-character prefix and the last
+  four characters so a key can be identified in code.
+- **Always expiring.** A key is valid for `API_KEY_DEFAULT_TTL` (90 days) unless
+  `expires_in_days` requests less, and can never exceed `API_KEY_MAX_TTL`
+  (365 days). There is no non-expiring key.
+- **Pinned to one organization.** A key only works on routes under the
+  organization it was minted in, and it authenticates as the user who created it.
+- **No authorization of its own.** Every request re-resolves the creator's
+  current membership and permissions, so a role change or a demotion takes effect
+  immediately, and removing the membership deletes the key through a composite
+  foreign key.
+- **Revocable and observable.** Revocation is immediate, `last_used_at` is
+  recorded (at most once a minute per key), and listing hides revoked keys unless
+  `include_revoked=true` is passed.
+
+An invalid, expired, or revoked key is rejected as a plain `401`
+authentication failure, so a caller cannot tell which of the three it was.
+
 The active tenant is derived server-side by verifying the authenticated user has
 an **active membership** in the requested organization; it is never taken from a
 client-supplied header. Unknown or cross-tenant organizations return **404**
@@ -380,7 +420,8 @@ roadmap.
 - [x] Phase 7 — Tasks: assignment, statuses, priorities, due dates, and task activity
 - [x] Phase 8 — Invitations: hashed single-use tokens, expiration, acceptance,
       and email delivery
-- [ ] Phase 9 — API keys
+- [x] Phase 9 — API keys: one-time display, hashed storage, authentication,
+      expiration, and revocation
 - [ ] Phase 10 — Background jobs
 - [ ] Phase 11 — Rate limiting
 - [ ] Phase 12 — Audit & observability
