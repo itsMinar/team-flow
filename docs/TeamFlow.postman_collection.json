@@ -107,6 +107,18 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated by Create Task."
+    },
+    {
+      "key": "invitation_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by Invite Member."
+    },
+    {
+      "key": "invitation_token",
+      "value": "",
+      "type": "string",
+      "description": "Copy the token from the emailed accept link (or the log sender output in local development). Never committed or exposed by the API."
     }
   ],
   "event": [
@@ -774,6 +786,120 @@
             "header": [{"key": "Accept", "value": "application/json"}],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/tasks/{{task_id}}",
             "description": "Deletes a task. Requires tasks.delete."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Invitations",
+      "item": [
+        {
+          "name": "Invite Member",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"newcomer@example.com\",\n  \"role_id\": \"{{role_id}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations",
+            "description": "Invites an email address to the organization with the given role. Requires members.manage. The response never contains the invitation link; it is only emailed."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('invitation_id', pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "List Invitations",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations?page=1&page_size=20&status=pending&sort=created_at&order=desc",
+            "description": "Lists invitations with filtering, sorting, and pagination. Requires members.manage."
+          },
+          "response": []
+        },
+        {
+          "name": "Resend Invitation",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations/{{invitation_id}}/resend",
+            "description": "Issues a new link for a pending invitation and invalidates the previous one. Requires members.manage."
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke Invitation",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations/{{invitation_id}}/revoke",
+            "description": "Revokes a pending invitation. Requires members.manage."
+          },
+          "response": []
+        },
+        {
+          "name": "Preview Invitation",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "header": [{"key": "Accept", "value": "application/json"}],
+            "url": "{{base_url}}/api/v1/invitations/{{invitation_token}}",
+            "description": "Previews an invitation. Public: the token is the credential. Returns the organization, role, status, expiry, and whether the invitee already has an account."
+          },
+          "response": []
+        },
+        {
+          "name": "Accept Invitation (new account)",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{invitation_token}}\",\n  \"password\": \"PostmanPassword123!\",\n  \"first_name\": \"Ada\",\n  \"last_name\": \"Newcomer\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/invitations/accept",
+            "description": "Accepts an invitation, creating the account, membership, and a session in one step. Use only when the invitee has no account yet; otherwise send just the token with a bearer access token."
+          },
+          "response": []
+        },
+        {
+          "name": "Accept Invitation (existing account)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Accept", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{invitation_token}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": "{{base_url}}/api/v1/invitations/accept",
+            "description": "Accepts an invitation as the signed-in user. The access token's email must match the invited address. Returns a new session for the joined organization."
           },
           "response": []
         }

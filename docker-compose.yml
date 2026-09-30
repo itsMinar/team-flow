@@ -46,6 +46,9 @@ services:
       JWT_ISSUER: ${JWT_ISSUER:-teamflow}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-720h}
+      INVITATION_BASE_URL: ${INVITATION_BASE_URL:-http://localhost:3000}
+      INVITATION_TTL: ${INVITATION_TTL:-168h}
+      MAIL_TRANSPORT: ${MAIL_TRANSPORT:-log}
     ports:
       - '8080:8080'
     depends_on:

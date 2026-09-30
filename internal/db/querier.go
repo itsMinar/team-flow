@@ -11,14 +11,17 @@ import (
 )
 
 type Querier interface {
+	AcceptInvitation(ctx context.Context, arg AcceptInvitationParams) (Invitation, error)
 	AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error
 	AddTeamMember(ctx context.Context, arg AddTeamMemberParams) (TeamMember, error)
 	CountActiveOwners(ctx context.Context, organizationID uuid.UUID) (int64, error)
 	CountActivityByResource(ctx context.Context, arg CountActivityByResourceParams) (int64, error)
+	CountInvitations(ctx context.Context, arg CountInvitationsParams) (int64, error)
 	CountMembershipsByRole(ctx context.Context, arg CountMembershipsByRoleParams) (int64, error)
 	CountProjects(ctx context.Context, arg CountProjectsParams) (int64, error)
 	CountTasks(ctx context.Context, arg CountTasksParams) (int64, error)
 	CreateActivityLog(ctx context.Context, arg CreateActivityLogParams) error
+	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateMembership(ctx context.Context, arg CreateMembershipParams) (OrganizationMembership, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
@@ -32,6 +35,12 @@ type Querier interface {
 	DeleteRole(ctx context.Context, arg DeleteRoleParams) error
 	DeleteTask(ctx context.Context, arg DeleteTaskParams) error
 	DeleteTeam(ctx context.Context, arg DeleteTeamParams) error
+	// Used to reject inviting someone who is already part of the organization.
+	GetActiveMembershipByEmail(ctx context.Context, arg GetActiveMembershipByEmailParams) (OrganizationMembership, error)
+	GetInvitationByID(ctx context.Context, arg GetInvitationByIDParams) (Invitation, error)
+	GetInvitationByIDForUpdate(ctx context.Context, arg GetInvitationByIDForUpdateParams) (Invitation, error)
+	GetInvitationByTokenHash(ctx context.Context, tokenHash string) (Invitation, error)
+	GetInvitationByTokenHashForUpdate(ctx context.Context, tokenHash string) (Invitation, error)
 	GetMembership(ctx context.Context, arg GetMembershipParams) (OrganizationMembership, error)
 	GetMembershipByID(ctx context.Context, arg GetMembershipByIDParams) (OrganizationMembership, error)
 	GetOrganizationByID(ctx context.Context, id uuid.UUID) (Organization, error)
@@ -50,6 +59,8 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	HasRolePermission(ctx context.Context, arg HasRolePermissionParams) (bool, error)
 	ListActivityByResource(ctx context.Context, arg ListActivityByResourceParams) ([]ActivityLog, error)
+	// Sort keys are fixed CASE branches, so client input never becomes SQL.
+	ListInvitations(ctx context.Context, arg ListInvitationsParams) ([]Invitation, error)
 	ListMembersByOrganization(ctx context.Context, organizationID uuid.UUID) ([]ListMembersByOrganizationRow, error)
 	ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]ListMembershipsByUserRow, error)
 	ListPermissionKeysByRole(ctx context.Context, roleID uuid.UUID) ([]string, error)
@@ -60,11 +71,16 @@ type Querier interface {
 	ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, error)
 	ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]ListTeamMembersRow, error)
 	ListTeams(ctx context.Context, organizationID uuid.UUID) ([]Team, error)
+	MarkInvitationExpired(ctx context.Context, arg MarkInvitationExpiredParams) (Invitation, error)
 	OrganizationSlugExists(ctx context.Context, slug string) (bool, error)
 	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
 	RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error
+	RevokeInvitation(ctx context.Context, arg RevokeInvitationParams) (Invitation, error)
 	RevokeRefreshToken(ctx context.Context, arg RevokeRefreshTokenParams) error
 	RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID) error
+	// Resending reuses the pending invitation and issues a fresh token, so the
+	// previous link stops working immediately.
+	RotateInvitationToken(ctx context.Context, arg RotateInvitationTokenParams) (Invitation, error)
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	UpdateMembershipRole(ctx context.Context, arg UpdateMembershipRoleParams) (OrganizationMembership, error)
 	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)

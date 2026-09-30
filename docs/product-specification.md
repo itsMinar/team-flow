@@ -135,6 +135,28 @@ return typed domain errors which the HTTP layer maps to status codes.
 - Unit, integration, HTTP, RLS, authorization, migration, formatting, static,
   and race checks pass before Phase 7 is marked complete.
 
+## Phase 8 Definition of Done
+
+- Invitations carry the organization, the invited email, and the role that will
+  be granted, with only the SHA-256 hash of a 256-bit token stored.
+- Invitation tokens are single use, expire after a bounded lifetime, and are
+  never returned by an API response.
+- Invitation management requires `members.manage`, resolves the tenant in the
+  service layer, and never discloses another organization's invitations.
+- Resend rotates the token and invalidates the previous link; revoke invalidates
+  a pending invitation.
+- The accept flow is public, previews only what the emailed invitee already
+  knows, and either creates the account or redeems with an existing session.
+- Acceptance creates the account, membership, and accepted invitation in one
+  tenant-scoped transaction, then issues a session.
+- An authenticated caller cannot redeem an invitation issued to another email
+  address, and a duplicate pending invitation for one address is rejected.
+- Transactional email goes through a transport interface, the development log
+  transport cannot run in production, and a delivery failure does not lose the
+  invitation.
+- Unit, integration, HTTP, RLS, authorization, migration, formatting, static,
+  and race checks pass before Phase 8 is marked complete.
+
 ## Definition of Done for the Product
 
 The product is complete only when the API, worker, migrations, seed data,

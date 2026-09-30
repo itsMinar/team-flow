@@ -13,6 +13,7 @@ import (
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/health"
+	"github.com/itsMinar/team-flow/internal/invitations"
 	"github.com/itsMinar/team-flow/internal/organizations"
 	"github.com/itsMinar/team-flow/internal/projects"
 	"github.com/itsMinar/team-flow/internal/tasks"
@@ -93,6 +94,7 @@ func TestRouter_TenantModulesRequireAuth(t *testing.T) {
 		TeamsHandler: teams.NewHandler(nil, logger),
 		Projects:     projects.NewHandler(nil, logger),
 		Tasks:        tasks.NewHandler(nil, logger),
+		Invitations:  invitations.NewHandler(nil, logger),
 	})
 	orgID := uuid.NewString()
 	for _, path := range []string{
@@ -105,11 +107,39 @@ func TestRouter_TenantModulesRequireAuth(t *testing.T) {
 		"/api/v1/organizations/" + orgID + "/tasks/" + uuid.NewString(),
 		"/api/v1/organizations/" + orgID + "/tasks/" + uuid.NewString() + "/activity",
 		"/api/v1/organizations/" + orgID + "/projects/" + uuid.NewString() + "/tasks",
+		"/api/v1/organizations/" + orgID + "/invitations",
+		"/api/v1/organizations/" + orgID + "/invitations/" + uuid.NewString() + "/resend",
+		"/api/v1/organizations/" + orgID + "/invitations/" + uuid.NewString() + "/revoke",
 	} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("GET %s = %d, want 401", path, rec.Code)
+		}
+	}
+}
+
+// The invitation accept and preview endpoints are public: the token is the
+// credential, so a missing Authorization header must not produce a 401.
+func TestRouter_PublicInvitationRoutes(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := &config.Config{}
+	cfg.HTTP.MaxBodyBytes = 1 << 20
+	router := NewRouter(Dependencies{
+		Config:      cfg,
+		Logger:      logger,
+		Health:      health.NewHandler(logger, map[string]health.Checker{}),
+		AuthMW:      auth.NewMiddleware(auth.NewJWTService("router-test-secret", "teamflow", time.Minute), logger),
+		Invitations: invitations.NewHandler(nil, logger),
+	})
+	for path, method := range map[string]string{
+		"/api/v1/invitations/" + uuid.NewString(): http.MethodGet,
+		"/api/v1/invitations/accept":              http.MethodPost,
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+		if rec.Code == http.StatusUnauthorized {
+			t.Errorf("%s %s must not require authentication", method, path)
 		}
 	}
 }

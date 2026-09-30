@@ -2,6 +2,77 @@
 
 Short records of notable engineering decisions. Newest first within each phase.
 
+## Phase 8 — Invitations
+
+### Invitation tokens are hashed, single use, and never returned by the API
+
+An invitation token is 256 bits of entropy, stored only as a SHA-256 hex digest,
+and looked up by that digest. This mirrors refresh tokens: a fast one-way digest
+is sufficient for a high-entropy secret and keeps lookup an indexed operation,
+which a slow KDF would prevent.
+
+The important decision is that **the token and the accept link are never part of
+an API response.** They exist once, at creation time, and are emailed. Returning
+them would let anyone holding `members.manage` redeem an invitation addressed to
+somebody else and take that membership for themselves. The emailed link is also
+the only recovery path for a lost invitation, which is why resend exists and why
+it is safe: resend rotates the token hash on the same pending row, so the old
+link stops working immediately and a token is never recoverable from the
+database.
+
+### Acceptance creates the membership, not the invitation
+
+Acceptance runs in one tenant-scoped transaction that creates the account (when
+needed), creates the membership with the role carried by the invitation, and
+marks the invitation accepted. A membership therefore can never exist without a
+matching accepted invitation, and a rolled-back acceptance leaves neither.
+
+The alternative, pre-creating a membership with status `invited` at invitation
+time, was rejected: it gives two sources of truth for "who has been invited", and
+the membership row would have to be updated or revoked on every invitation
+lifecycle transition.
+
+An authenticated caller may only redeem an invitation issued to their own email
+address (`INVITATION_EMAIL_MISMATCH`); an anonymous caller whose email already
+has an account is told to sign in instead (`ACCOUNT_EXISTS`). Neither path can
+occupy an address that the token was not issued to.
+
+### Expiry is enforced lazily and persisted on use
+
+A pending invitation past `expires_at` is reported as `expired` in previews and
+lists without being written, and the transition is persisted when acceptance
+first observes it — outside the failing transaction, so the update commits. This
+avoids a sweep job in a phase that has no worker yet, while still letting the
+database state converge. The expiry is also bounded by configuration
+(`INVITATION_TTL`, at most 720 hours) because an invitation link that never
+expires is a standing credential sitting in a mailbox.
+
+### Email delivery is behind an interface, and the log transport cannot ship
+
+`internal/mailer` defines a `Sender` so domain services never depend on a
+transport. Phase 8 ships two: a log sender that writes the invitation link so
+the flow is followable in local development, and a discard sender.
+
+Because the log sender writes a live invitation link, configuration **rejects
+it when `APP_ENV=production`**. That converts an easy mistake (shipping a dev
+transport) into a startup failure instead of a leaked credential, and it makes
+the missing piece explicit: production needs a real sender, which arrives with
+the Phase 10 job queue.
+
+Delivery happens after the invitation transaction commits, so an email can never
+reference an invitation that was rolled back. A delivery failure is logged
+rather than returned, because the invitation exists and can be resent; returning
+an error would suggest the invite was never created.
+
+### The accept endpoint uses optional authentication
+
+`auth.Middleware.OptionalAuth` populates the principal when a valid access token
+is present and otherwise passes the request through. This lets one public
+endpoint serve both paths — create an account, or redeem with an existing session
+— without the ambiguity of accepting credentials and tokens in one request. An
+invalid or missing token is never an error there, so the middleware is only
+suitable for endpoints where the token is the real credential.
+
 ## Phase 7 — Tasks
 
 ### Tasks are organization-scoped and reached through their project

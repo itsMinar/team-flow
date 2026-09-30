@@ -200,6 +200,13 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 }
 
 func requestMeta(r *http.Request) RequestMeta {
+	return RequestMetaFromRequest(r)
+}
+
+// RequestMetaFromRequest captures the user agent and client IP used to record
+// session provenance. Other handlers that create sessions use it too, so every
+// session in the system is recorded the same way.
+func RequestMetaFromRequest(r *http.Request) RequestMeta {
 	return RequestMeta{
 		UserAgent: r.UserAgent(),
 		IPAddress: clientIP(r),

@@ -13,6 +13,7 @@ import (
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/health"
 	"github.com/itsMinar/team-flow/internal/httpx"
+	"github.com/itsMinar/team-flow/internal/invitations"
 	"github.com/itsMinar/team-flow/internal/middleware"
 	"github.com/itsMinar/team-flow/internal/organizations"
 	"github.com/itsMinar/team-flow/internal/projects"
@@ -33,6 +34,7 @@ type Dependencies struct {
 	TeamsHandler *teams.Handler
 	Projects     *projects.Handler
 	Tasks        *tasks.Handler
+	Invitations  *invitations.Handler
 }
 
 // NewRouter builds the top-level HTTP handler with the standard middleware
@@ -69,6 +71,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		}
 		if deps.Tasks != nil && deps.AuthMW != nil {
 			deps.Tasks.RegisterRoutes(r, deps.AuthMW)
+		}
+		if deps.Invitations != nil && deps.AuthMW != nil {
+			deps.Invitations.RegisterRoutes(r, deps.AuthMW)
 		}
 	})
 

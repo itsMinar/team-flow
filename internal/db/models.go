@@ -21,6 +21,22 @@ type ActivityLog struct {
 	CreatedAt      time.Time
 }
 
+type Invitation struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Email          string
+	RoleID         uuid.UUID
+	Status         string
+	TokenHash      string
+	InvitedBy      uuid.UUID
+	ExpiresAt      time.Time
+	AcceptedAt     *time.Time
+	AcceptedBy     *uuid.UUID
+	RevokedAt      *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type Organization struct {
 	ID        uuid.UUID
 	Name      string

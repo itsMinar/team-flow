@@ -5,11 +5,17 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// maxInvitationTTL bounds how long an invitation link stays valid. A link that
+// never expires is a standing credential in a mailbox, so the lifetime is
+// capped even if an operator asks for more.
+const maxInvitationTTL = 30 * 24 * time.Hour
 
 // Environment represents the runtime environment of the application.
 type Environment string
@@ -30,6 +36,8 @@ type Config struct {
 	Redis    RedisConfig
 	Log      LogConfig
 	JWT      JWTConfig
+	Invite   InvitationConfig
+	Mail     MailConfig
 }
 
 // AppConfig holds general application settings.
@@ -75,6 +83,26 @@ type JWTConfig struct {
 	RefreshTTL time.Duration
 }
 
+// InvitationConfig holds settings for organization invitations: how long an
+// invitation stays valid, and the public base URL used to build the accept link
+// that is emailed to the invitee.
+type InvitationConfig struct {
+	TTL     time.Duration
+	BaseURL string
+}
+
+// Mail transports. The log transport writes invitation links to the
+// application log, which is only acceptable outside production.
+const (
+	MailTransportLog  = "log"
+	MailTransportNone = "none"
+)
+
+// MailConfig selects how transactional email is delivered.
+type MailConfig struct {
+	Transport string
+}
+
 // IsProduction reports whether the application is running in production.
 func (c *Config) IsProduction() bool {
 	return c.App.Env == EnvProduction
@@ -114,6 +142,13 @@ func Load() (*Config, error) {
 			Issuer:     getEnv("JWT_ISSUER", "teamflow"),
 			AccessTTL:  getEnvDuration("JWT_ACCESS_TTL", 15*time.Minute),
 			RefreshTTL: getEnvDuration("JWT_REFRESH_TTL", 720*time.Hour),
+		},
+		Mail: MailConfig{
+			Transport: strings.ToLower(getEnv("MAIL_TRANSPORT", MailTransportLog)),
+		},
+		Invite: InvitationConfig{
+			TTL:     getEnvDuration("INVITATION_TTL", 168*time.Hour),
+			BaseURL: strings.TrimRight(getEnv("INVITATION_BASE_URL", "http://localhost:3000"), "/"),
 		},
 	}
 
@@ -162,8 +197,41 @@ func (c *Config) validate() error {
 		problems = append(problems, "JWT_REFRESH_TTL must be greater than JWT_ACCESS_TTL")
 	}
 
+	if c.Invite.TTL <= 0 {
+		problems = append(problems, "INVITATION_TTL must be positive")
+	}
+	if c.Invite.TTL > maxInvitationTTL {
+		problems = append(problems, fmt.Sprintf("INVITATION_TTL must not exceed %s", maxInvitationTTL))
+	}
+	if err := validateAbsoluteURL("INVITATION_BASE_URL", c.Invite.BaseURL); err != nil {
+		problems = append(problems, err.Error())
+	}
+
+	switch c.Mail.Transport {
+	case MailTransportLog, MailTransportNone:
+	default:
+		problems = append(problems, fmt.Sprintf("MAIL_TRANSPORT %q is invalid (want log|none)", c.Mail.Transport))
+	}
+	// The log transport writes live invitation links to the log, so it is a
+	// development convenience only. Running it in production would put
+	// unexpired organization-join credentials in the log sink.
+	if c.App.Env == EnvProduction && c.Mail.Transport == MailTransportLog {
+		problems = append(problems,
+			"MAIL_TRANSPORT must not be log in production; configure a real email sender")
+	}
+
 	if len(problems) > 0 {
 		return fmt.Errorf("invalid configuration:\n  - %s", strings.Join(problems, "\n  - "))
+	}
+	return nil
+}
+
+// validateAbsoluteURL requires an http(s) URL with a host so it can be used as a
+// link target.
+func validateAbsoluteURL(name, raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return fmt.Errorf("%s must be an absolute http(s) URL", name)
 	}
 	return nil
 }

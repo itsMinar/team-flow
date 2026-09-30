@@ -20,6 +20,8 @@ import (
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/database"
 	"github.com/itsMinar/team-flow/internal/health"
+	"github.com/itsMinar/team-flow/internal/invitations"
+	"github.com/itsMinar/team-flow/internal/mailer"
 	"github.com/itsMinar/team-flow/internal/observability"
 	"github.com/itsMinar/team-flow/internal/organizations"
 	"github.com/itsMinar/team-flow/internal/projects"
@@ -86,6 +88,17 @@ func run() error {
 	taskService := tasks.NewService(db.Pool, orgService)
 	taskHandler := tasks.NewHandler(taskService, logger)
 
+	// Invitation email: the log transport is for local development and tests.
+	// Phase 10 adds the queued sender used in production.
+	var mailSender mailer.Sender = mailer.NewLogSender(logger)
+	if cfg.Mail.Transport == config.MailTransportNone {
+		mailSender = mailer.DiscardSender{}
+		logger.Warn("mail transport disabled; invitations will not be delivered")
+	}
+	invitationService := invitations.NewService(db.Pool, orgService, authService,
+		mailSender, cfg.Invite.TTL, cfg.Invite.BaseURL, logger)
+	invitationHandler := invitations.NewHandler(invitationService, logger)
+
 	router := api.NewRouter(api.Dependencies{
 		Config:       cfg,
 		Logger:       logger,
@@ -97,6 +110,7 @@ func run() error {
 		TeamsHandler: teamHandler,
 		Projects:     projectHandler,
 		Tasks:        taskHandler,
+		Invitations:  invitationHandler,
 	})
 
 	srv := &http.Server{

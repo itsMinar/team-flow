@@ -6,7 +6,7 @@ This document explains what TeamFlow can do today, how its parts fit together, h
 
 TeamFlow is a Go backend for a multi-tenant team and project-management SaaS product. It is designed for multiple organizations to share one deployment and database while keeping organization data isolated.
 
-The project is currently an API foundation with seven completed phases:
+The project is currently an API foundation with eight completed phases:
 
 1. Foundation and infrastructure
 2. Authentication and session security
@@ -15,13 +15,16 @@ The project is currently an API foundation with seven completed phases:
 5. Teams and team memberships
 6. Projects, pagination, filtering, sorting, authorization, and activity
 7. Tasks, assignment, statuses, priorities, due dates, and task activity
+8. Invitations, hashed single-use tokens, expiration, acceptance, and email
 
 The codebase is a modular monolith. It has one repository and two executable processes:
 
 - `cmd/api`: HTTP API server
 - `cmd/worker`: background-worker process scaffold
 
-The current release is useful for building and testing secure SaaS foundations. It can create users and organizations, authenticate users, manage memberships, enforce tenant boundaries, and manage organization teams, projects, and tasks.
+The current release is useful for building and testing secure SaaS foundations. It can create users and organizations, authenticate users, manage memberships, enforce tenant boundaries,
+and manage organization teams, projects, and tasks. Organization invitations let
+new people join an existing organization with a chosen role.
 
 ## 2. What You Can Do Today
 
@@ -92,6 +95,25 @@ The current release is useful for building and testing secure SaaS foundations. 
 - Unassign a task automatically when its assignee loses the membership.
 - Delete a task when its project is deleted, and keep tasks tenant-isolated with
   composite foreign keys and Row Level Security.
+
+### Invitations
+
+- Invite an email address to an organization with a role chosen by the inviter.
+- List invitations with status and email filters, sorting, and pagination.
+- Resend a pending invitation, which issues a new link and invalidates the old one.
+- Revoke a pending invitation.
+- Preview an invitation before accepting it, without any authentication.
+- Accept an invitation as a new account, with the account created in the same
+  transaction.
+- Accept an invitation as an already signed-in user, when the account email
+  matches the invitation.
+- Receive a session on acceptance, so the invitee is signed in immediately.
+- Store only the SHA-256 hash of the invitation token and never return the token
+  or the link in an API response.
+- Enforce expiration, single use, and tenant isolation in the service layer and
+  the database.
+- Refuse to invite someone who already belongs to the organization, and reserve
+  inviting another Owner for Owners.
 
 ### Operations and reliability
 
@@ -290,6 +312,71 @@ curl -sS "http://localhost:8080/api/v1/organizations/$ORG_ID/tasks?assignee_id=$
   -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
+### Invitation endpoints
+
+All invitation management routes require a valid bearer access token and the
+`members.manage` permission.
+
+| Method   | Path                                                        | Description                                     |
+| -------- | ----------------------------------------------------------- | ----------------------------------------------- |
+| `GET`    | `/organizations/{orgID}/invitations`                         | Lists invitations with filters and pagination.  |
+| `POST`   | `/organizations/{orgID}/invitations`                         | Invites an email address with a role.          |
+| `POST`   | `/organizations/{orgID}/invitations/{invitationID}/resend`   | Issues a new link for a pending invitation.    |
+| `POST`   | `/organizations/{orgID}/invitations/{invitationID}/revoke`   | Revokes a pending invitation.                  |
+
+The accept flow is public because the token is the credential.
+
+| Method   | Path                   | Authentication                        | Description                                  |
+| -------- | ---------------------- | ------------------------------------- | -------------------------------------------- |
+| `GET`    | `/invitations/{token}` | Public                                | Previews the organization, role, and expiry. |
+| `POST`   | `/invitations/accept`  | Optional: bearer token if present     | Accepts the invitation and returns a session. |
+
+Invitation list query parameters are `page`, `page_size` (maximum 100),
+`status`, `email`, `sort`, and `order`. Supported sorts are `created_at`,
+`expires_at`, and `email`. Valid statuses are `pending`, `accepted`, `revoked`,
+and `expired`.
+
+Invitation create requests use this shape:
+
+```json
+{
+  "email": "newcomer@example.com",
+  "role_id": "5b1c1f2e-6a1a-4a6b-9c3d-2f8a1b6c4d5e"
+}
+```
+
+The response contains the invitation record and **not** the token; the link is
+only delivered by email. Role ids come from
+`GET /organizations/{orgID}/roles`, and inviting the Owner role requires the
+inviter to be an Owner.
+
+Accepting an invitation creates the account:
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/invitations/accept \
+  -H 'Content-Type: application/json' \
+  -d '{"token":"INVITATION_TOKEN","password":"correct-horse-123","first_name":"Ada","last_name":"Newcomer"}'
+```
+
+Someone who already has an account sends only the token and authenticates:
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/invitations/accept \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"token":"INVITATION_TOKEN"}'
+```
+
+Both responses contain `access_token`, `refresh_token`, `token_type`,
+`expires_in`, the joined `organization`, the granted `role`, and the `user`.
+
+Errors specific to invitations are `INVITATION_NOT_FOUND` (404),
+`INVITATION_ALREADY_ACCEPTED` (409), `INVITATION_EXPIRED` (410),
+`INVITATION_REVOKED` (410), `INVITATION_NOT_ACTIVE` (409) for resending a spent
+invitation, `INVITATION_PENDING` (409) for a second pending invitation to the
+same address, `ALREADY_A_MEMBER` (409), `ACCOUNT_EXISTS` (409),
+`INVITATION_EMAIL_MISMATCH` (403), and `ROLE_NOT_FOUND` (404).
+
 #### Create an organization
 
 ```bash
@@ -368,6 +455,8 @@ Handlers decode requests and write responses. Services contain business rules an
 | `internal/health`        | Liveness and readiness handlers.                                                  |
 | `internal/fieldtypes`   | Shared calendar-date and partial-update field types.                              |
 | `internal/httpx`         | JSON envelopes, decoding, typed errors, and client-safe error mapping.            |
+| `internal/invitations`   | Invitation creation, resend, revocation, preview, and acceptance.                |
+| `internal/mailer`        | Transactional email sender interface and transports.                            |
 | `internal/middleware`    | Shared HTTP middleware.                                                           |
 | `internal/observability` | Structured logging and request ID support.                                        |
 | `internal/organizations` | Organization services, handlers, routes, and tenant resolution.                   |
@@ -395,6 +484,8 @@ internal/
   middleware/              Shared HTTP middleware
   observability/            JSON logging and request IDs
   fieldtypes/               Shared calendar-date and partial-update types
+  invitations/              Invitation and acceptance logic
+  mailer/                   Transactional email sender and transports
   organizations/            Organization and tenant logic
   permissions/              Permission keys and default role grants
   projects/                 Project and project-activity logic
@@ -523,6 +614,14 @@ Configuration is loaded from environment variables at startup. Invalid configura
 | `JWT_ISSUER`                  | `teamflow`    | JWT issuer claim.                                                     |
 | `JWT_ACCESS_TTL`              | `15m`         | Access-token lifetime.                                                |
 | `JWT_REFRESH_TTL`             | `720h`        | Refresh-token lifetime and must exceed access TTL.                    |
+| `INVITATION_BASE_URL`         | `http://localhost:3000` | Public origin of the client that renders the accept page.  |
+| `INVITATION_TTL`              | `168h`        | Invitation lifetime; must be positive and at most 720h.             |
+| `MAIL_TRANSPORT`              | `log`        | Transactional mail transport: `log` or `none`.                     |
+
+`MAIL_TRANSPORT=log` writes the invitation link to the application log so the
+accept flow can be followed without an SMTP server. It is rejected when
+`APP_ENV=production`, because a live invitation link must never be written to a
+production log sink; `MAIL_TRANSPORT=none` disables delivery entirely.
 
 Never commit `.env` or production secrets. The example JWT secret is for local development only.
 
@@ -557,6 +656,8 @@ The current migrations cover:
 - Projects, project activity, filtering, sorting, pagination, and RLS
 - Tasks, assignment to active organization members, composite project and
   membership foreign keys, indexes, and RLS
+- Invitations with hashed single-use tokens, a composite role foreign key, a
+  one-pending-invitation-per-email constraint, and RLS
 
 ### How tenant access works
 
@@ -592,6 +693,8 @@ Organization creation is atomic: the organization, default roles, and Owner memb
 
 ### Refresh tokens
 
+- Invitation tokens use 256 bits of entropy, are stored only as SHA-256 hashes,
+  are single use, expire, and are never returned by the API.
 - Tokens are generated from cryptographically secure random bytes.
 - Only SHA-256 hashes are stored.
 - Rotation is protected by a PostgreSQL row lock and transaction.
@@ -739,7 +842,6 @@ The container API publishes port `8080`. Stop it before `make dev`, or set a dif
 
 The following capabilities are planned and should not be assumed to exist yet:
 
-- Invitations and email-based onboarding
 - API keys
 - Actual background-job processing
 - Redis-backed rate limiting
@@ -756,7 +858,7 @@ The planned roadmap is:
 5. Teams - complete
 6. Projects - complete
 7. Tasks - complete
-8. Invitations - planned
+8. Invitations - complete
 9. API keys - planned
 10. Background jobs - planned
 11. Rate limiting - planned
@@ -770,9 +872,10 @@ Architecture decisions and the reasoning behind major security and infrastructur
 
 A practical order for continuing the project is:
 
-1. Add membership management: invite, activate, suspend, and remove members.
+1. Add membership management: suspend and remove members, and resend credentials.
 2. Add comments, task watchers, and task labels on top of the task model.
-3. Add background jobs for invitations, notifications, and other asynchronous work.
+3. Add background jobs for email delivery, notifications, and other asynchronous
+   work, replacing the log mail transport.
 4. Add rate limiting and audit events before exposing the API publicly.
 5. Expand OpenAPI or Postman documentation as each endpoint is added.
 6. Add production deployment configuration, secret management, metrics, tracing, backups, and migration runbooks.

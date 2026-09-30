@@ -55,6 +55,38 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// OptionalAuth stores the principal when a valid access token is present and
+// otherwise lets the request through unauthenticated.
+//
+// It is used by public endpoints that behave differently for signed-in users,
+// such as accepting an invitation: an existing member authenticates first,
+// while someone without an account creates one. An invalid or missing token is
+// never an error here, so this must not be used to protect anything.
+func (m *Middleware) OptionalAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, ok := bearerToken(r)
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		claims, err := m.jwt.ParseAccessToken(token)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		userID, err := uuid.Parse(claims.Subject)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		tokenID, _ := uuid.Parse(claims.ID)
+		next.ServeHTTP(w, r.WithContext(authctx.WithPrincipal(r.Context(), authctx.Principal{
+			UserID:  userID,
+			TokenID: tokenID,
+		})))
+	})
+}
+
 // bearerToken extracts the token from an "Authorization: Bearer <token>"
 // header. The header value itself is never logged.
 func bearerToken(r *http.Request) (string, bool) {

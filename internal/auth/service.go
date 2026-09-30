@@ -144,7 +144,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, meta RequestMe
 	if err != nil {
 		return nil, err
 	}
-	return &AuthResult{Tokens: *tokens, User: newUserDTO(user)}, nil
+	return &AuthResult{Tokens: *tokens, User: NewUserDTO(user)}, nil
 }
 
 // Login verifies credentials and issues a new session. It returns a generic
@@ -175,7 +175,7 @@ func (s *Service) Login(ctx context.Context, in LoginInput, meta RequestMeta) (*
 	if err != nil {
 		return nil, err
 	}
-	return &AuthResult{Tokens: *tokens, User: newUserDTO(user)}, nil
+	return &AuthResult{Tokens: *tokens, User: NewUserDTO(user)}, nil
 }
 
 // Refresh rotates a refresh token: it validates the presented token, issues a
@@ -250,7 +250,7 @@ func (s *Service) Refresh(ctx context.Context, rawToken string, meta RequestMeta
 			ExpiresIn:    int(time.Until(expiresAt).Seconds()),
 			ExpiresAt:    expiresAt,
 		},
-		User: newUserDTO(user),
+		User: NewUserDTO(user),
 	}, nil
 }
 
@@ -288,7 +288,16 @@ func (s *Service) CurrentUser(ctx context.Context, userID uuid.UUID) (UserDTO, e
 		}
 		return UserDTO{}, fmt.Errorf("get user: %w", err)
 	}
-	return newUserDTO(user), nil
+	return NewUserDTO(user), nil
+}
+
+// IssueSession starts a new authenticated session for an existing user.
+//
+// It exists for flows that establish identity outside login, such as accepting
+// an organization invitation, so those flows do not have to duplicate session
+// creation. Callers must have already verified the user's identity.
+func (s *Service) IssueSession(ctx context.Context, userID uuid.UUID, meta RequestMeta) (*TokenPair, error) {
+	return s.issueSession(ctx, userID, uuid.New(), meta)
 }
 
 // issueSession creates a new refresh-token family and an access token.

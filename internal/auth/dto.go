@@ -59,9 +59,9 @@ type UserDTO struct {
 	CreatedAt       time.Time  `json:"created_at"`
 }
 
-// newUserDTO maps a database user to the client-safe DTO, dropping the password
+// NewUserDTO maps a database user to the client-safe DTO, dropping the password
 // hash and any other sensitive fields.
-func newUserDTO(u db.User) UserDTO {
+func NewUserDTO(u db.User) UserDTO {
 	return UserDTO{
 		ID:              u.ID,
 		Email:           u.Email,

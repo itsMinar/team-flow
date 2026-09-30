@@ -6,7 +6,7 @@ infrastructure while their data stays strictly isolated.
 
 This repository is being built incrementally, phase by phase. **Phases 1
 (Foundation), 2 (Authentication), 3 (Multi-tenancy), 4 (RBAC), 5 (Teams), 6
-(Projects), and 7 (Tasks) are complete.** See
+(Projects), 7 (Tasks), and 8 (Invitations) are complete.** See
 [Roadmap](#roadmap) for what is done and what comes next.
 
 ## Overview
@@ -67,6 +67,8 @@ internal/
   fieldtypes/  Shared calendar-date and partial-update field types
   health/      Liveness and readiness handlers
   httpx/       Response envelope + typed error mapping
+  invitations/ Organization invitations, acceptance, and token lifecycle
+  mailer/      Transactional email sender interface and transports
   middleware/  Reusable HTTP middleware
   observability/ Structured logging (and later metrics/tracing)
   organizations/ Organizations, memberships, roles, and tenant resolution
@@ -149,7 +151,9 @@ logout-all, JWT expiration requirements, HTTP authentication/validation, and
 cross-tenant isolation (reads, member listing, and updates across organizations
 must fail without leaking existence). It also covers team, project, and task
 authorization, filtering, pagination, activity recording, tenant-scoped foreign
-keys, and Row Level Security.
+keys, and Row Level Security, plus the invitation lifecycle: delivery, expiry,
+single use, resend rotation, revocation, acceptance for new and existing
+accounts, and the guarantee that the token never appears in an API response.
 
 ## Database / migrations
 
@@ -299,6 +303,44 @@ combined. An assignee must be an active member of the same organization;
 removing a membership unassigns its tasks, and deleting a project deletes its
 tasks.
 
+Invitations let someone outside an organization join it with a role the
+inviter chooses. They are managed with the `members.manage` permission:
+
+| Method | Path                                                          | Authorization  | Purpose                             |
+| ------ | ------------------------------------------------------------- | -------------- | ----------------------------------- |
+| GET    | `/organizations/{orgID}/invitations`                          | `members.manage` | List invitations                    |
+| POST   | `/organizations/{orgID}/invitations`                          | `members.manage` | Invite an email address             |
+| POST   | `/organizations/{orgID}/invitations/{invitationID}/resend`    | `members.manage` | Issue a new link for a pending invite |
+| POST   | `/organizations/{orgID}/invitations/{invitationID}/revoke`    | `members.manage` | Revoke a pending invitation         |
+
+The accept flow is public because the invitation token is itself the credential:
+
+| Method | Path                        | Authentication                | Purpose                                     |
+| ------ | --------------------------- | ----------------------------- | ------------------------------------------- |
+| GET    | `/invitations/{token}`      | Public                        | Preview the organization, role, and expiry  |
+| POST   | `/invitations/accept`       | Optional (Bearer if present) | Create the account or join with a session    |
+
+Invitation list query parameters are `page`, `page_size` (maximum 100),
+`status`, `email`, `sort`, and `order`. Supported sorts are `created_at`,
+`expires_at`, and `email`.
+
+Invitations are single-use and expire after `INVITATION_TTL` (168 hours by
+default, capped at 720 hours). Only the SHA-256 hash of the token is stored and
+the token is never returned by the API: it is emailed, so a caller holding
+`members.manage` cannot redeem an invitation addressed to someone else.
+Resending rotates the token and invalidates the previous link; revoking makes it
+unusable. Acceptance runs in one transaction that creates the membership with
+the invited role and marks the invitation accepted, then issues a session so the
+invitee is signed in immediately. An authenticated caller redeeming someone
+else's invitation is refused with `INVITATION_EMAIL_MISMATCH`, and an anonymous
+caller whose email already has an account gets `ACCOUNT_EXISTS`.
+
+Transactional email goes through the `mailer` package. `MAIL_TRANSPORT=log`
+writes the invitation link to the application log for local development and is
+rejected when `APP_ENV=production`, so a live invitation link can never end up
+in a production log sink. `MAIL_TRANSPORT=none` disables delivery entirely.
+Phase 10 replaces the log transport with the queued sender used in production.
+
 The active tenant is derived server-side by verifying the authenticated user has
 an **active membership** in the requested organization; it is never taken from a
 client-supplied header. Unknown or cross-tenant organizations return **404**
@@ -336,7 +378,8 @@ roadmap.
 - [x] Phase 5 — Teams: organization-scoped teams, team memberships, and authorization
 - [x] Phase 6 — Projects: filtering, sorting, pagination, authorization, and activity logging
 - [x] Phase 7 — Tasks: assignment, statuses, priorities, due dates, and task activity
-- [ ] Phase 8 — Invitations
+- [x] Phase 8 — Invitations: hashed single-use tokens, expiration, acceptance,
+      and email delivery
 - [ ] Phase 9 — API keys
 - [ ] Phase 10 — Background jobs
 - [ ] Phase 11 — Rate limiting

@@ -75,3 +75,52 @@ func TestRequireAuth(t *testing.T) {
 		})
 	}
 }
+
+func TestOptionalAuth(t *testing.T) {
+	service := NewJWTService("test-secret", "teamflow", time.Minute)
+	userID, tokenID := uuid.New(), uuid.New()
+	valid, _, err := service.GenerateAccessToken(userID, tokenID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired, _, err := NewJWTService("test-secret", "teamflow", -time.Minute).GenerateAccessToken(userID, tokenID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	middleware := NewMiddleware(service, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	tests := []struct {
+		name       string
+		header     string
+		wantAuthed bool
+	}{
+		{name: "missing", wantAuthed: false},
+		{name: "malformed", header: "Bearer invalid"},
+		{name: "expired", header: "Bearer " + expired},
+		{name: "valid", header: "Bearer " + valid, wantAuthed: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			handler := middleware.OptionalAuth(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				principal, ok := authctx.PrincipalFromContext(request.Context())
+				// An unauthenticated request must always reach the handler.
+				if ok != test.wantAuthed {
+					t.Fatalf("authenticated = %v, want %v", ok, test.wantAuthed)
+				}
+				if ok && (principal.UserID != userID || principal.TokenID != tokenID) {
+					t.Fatalf("unexpected principal: %+v", principal)
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/invitations/accept", nil)
+			if test.header != "" {
+				request.Header.Set("Authorization", test.header)
+			}
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, want 204", recorder.Code)
+			}
+		})
+	}
+}
