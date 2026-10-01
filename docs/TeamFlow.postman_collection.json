@@ -171,9 +171,16 @@
         {
           "name": "Liveness",
           "request": {
-            "auth": {"type": "noauth"},
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/health",
             "description": "Checks that the API process is running. Expected status: 200."
           },
@@ -182,9 +189,16 @@
         {
           "name": "Readiness",
           "request": {
-            "auth": {"type": "noauth"},
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/ready",
             "description": "Checks PostgreSQL and Redis connectivity. Expected status: 200; 503 means a dependency is unavailable."
           },
@@ -198,16 +212,28 @@
         {
           "name": "Register",
           "request": {
-            "auth": {"type": "noauth"},
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"first_name\": \"{{first_name}}\",\n  \"last_name\": \"{{last_name}}\",\n  \"organization_name\": \"{{organization_name}}\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/auth/register",
             "description": "Creates a user, organization, Owner role, membership, and session. Expected status: 201. Tokens are saved automatically. An existing email returns 409; change the email variable or use Login."
@@ -230,16 +256,28 @@
         {
           "name": "Login",
           "request": {
-            "auth": {"type": "noauth"},
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/auth/login",
             "description": "Logs in with the configured account and saves a new access/refresh token pair. Expected status: 200; invalid credentials return 401."
@@ -250,7 +288,12 @@
           "name": "Current User",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/auth/me",
             "description": "Returns the current user's profile using the collection's Bearer access token. Run Register or Login first. Expected status: 200."
           },
@@ -259,16 +302,28 @@
         {
           "name": "Refresh Tokens",
           "request": {
-            "auth": {"type": "noauth"},
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/auth/refresh",
             "description": "Rotates the current refresh token and automatically saves both replacement tokens. Expected status: 200. Do not send concurrent refreshes or replay an old token; reuse revokes the entire session family."
@@ -278,16 +333,28 @@
         {
           "name": "Logout",
           "request": {
-            "auth": {"type": "noauth"},
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/auth/logout",
             "description": "Revokes the current refresh-token family. Expected status: 200. Clears the saved refresh token on success. The access token remains valid until expiry and is retained so Logout All Sessions can run next."
@@ -311,7 +378,12 @@
           "name": "Logout All Sessions",
           "request": {
             "method": "POST",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/auth/logout-all",
             "description": "Requires a valid access token. Revokes ALL of this user's refresh-token sessions across devices, not just the session created by this collection. Expected status: 200. Clears the collection's saved tokens and user ID on success. Already-issued access tokens remain valid server-side until expiry."
           },
@@ -341,7 +413,12 @@
           "name": "List My Organizations",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations",
             "description": "Lists the active organizations the authenticated user belongs to (the organization-switching list). Run Register or Login first. Expected status: 200. Saves the first organization's id to organization_id."
           },
@@ -368,13 +445,23 @@
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Second Organization\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations",
             "description": "Creates a new organization with the default system roles and an Owner membership for the caller, atomically. Expected status: 201. Saves the new organization's id to organization_id. name is required and limited to 150 characters."
@@ -404,7 +491,12 @@
           "name": "Get Organization",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}",
             "description": "Returns a single organization the caller is an active member of, including the caller's role. Expected status: 200. Unknown or cross-tenant organizations return 404."
           },
@@ -415,13 +507,23 @@
           "request": {
             "method": "PATCH",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Renamed Organization\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}",
             "description": "Renames the organization. Requires the caller to be Owner or Admin; other roles return 403. Expected status: 200. name is required and limited to 150 characters."
@@ -432,7 +534,12 @@
           "name": "List Members",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/members",
             "description": "Lists the members of the organization. Any active member may read. Expected status: 200. Cross-tenant access returns 404."
           },
@@ -442,7 +549,12 @@
           "name": "List Roles",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/roles",
             "description": "Lists organization roles and their permissions. Requires roles.read. Expected status: 200. Saves the first role id to role_id."
           },
@@ -469,13 +581,23 @@
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Project Lead\",\n  \"description\": \"Can read organization and member data\",\n  \"permissions\": [\"organizations.read\", \"members.read\"]\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/roles",
             "description": "Creates a custom role. Requires roles.manage. Expected status: 201."
@@ -503,13 +625,23 @@
           "request": {
             "method": "PATCH",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Project Lead\",\n  \"description\": \"Updated project lead permissions\",\n  \"permissions\": [\"organizations.read\", \"members.read\", \"roles.read\"]\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/roles/{{role_id}}",
             "description": "Updates a custom role and replaces its permissions. Requires roles.manage. System roles cannot be changed. Expected status: 200."
@@ -521,13 +653,23 @@
           "request": {
             "method": "PATCH",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"role_id\": \"{{role_id}}\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/members/{{membership_id}}/role",
             "description": "Assigns a role to an active member. Requires members.manage. Set membership_id first. The last Owner cannot be demoted. Expected status: 200."
@@ -538,11 +680,75 @@
           "name": "Delete Custom Role",
           "request": {
             "method": "DELETE",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/roles/{{role_id}}",
             "description": "Deletes an unused custom role. Requires roles.manage. System roles and roles assigned to members cannot be deleted. Expected status: 200."
           },
           "response": []
+        },
+        {
+          "name": "Audit Log",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/audit-logs?page=1&page_size=20&sort=created_at&order=desc&action=user.logged_in&outcome=success&actor_user_id={{user_id}}&since=2026-01-01T00:00:00Z",
+            "description": "Lists the organization's security audit log, newest first. Requires audit.read (Owner and Admin by default). Entries are append-only: no endpoint can edit or delete them. Optional filters: action, outcome, actor_user_id, since (RFC 3339, at most 90 days back). Authentication events that belong to no organization are never returned here. Expected status: 200."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('audit log returns an array', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(pm.response.code).to.eql(200);",
+                  "    pm.expect(body.data).to.be.an('array');",
+                  "    pm.expect(body.meta).to.have.property('total');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "Audit Log",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/audit-logs?page=1&page_size=20"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "X-Trace-Id",
+                  "value": "0af7651916cd43dd8448eb211c80319c"
+                }
+              ],
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"2f1c9a44-0f2b-4a0e-9c4e-6a0b2d5e8f10\",\n      \"organization_id\": \"{{organization_id}}\",\n      \"actor_user_id\": \"{{user_id}}\",\n      \"action\": \"user.logged_in\",\n      \"outcome\": \"success\",\n      \"target_type\": \"user\",\n      \"target_id\": \"{{user_id}}\",\n      \"ip_address\": \"203.0.113.24\",\n      \"user_agent\": \"PostmanRuntime/7.39.0\",\n      \"request_id\": \"01HQ8Z5V2R6M7N8P9Q0S1T2V3W\",\n      \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\",\n      \"metadata\": {\n        \"method\": \"password\"\n      },\n      \"created_at\": \"2026-09-30T10:15:00Z\"\n    }\n  ],\n  \"meta\": {\n    \"page\": 1,\n    \"page_size\": 20,\n    \"total\": 1,\n    \"total_pages\": 1\n  }\n}"
+            }
+          ]
         }
       ]
     },
@@ -553,7 +759,12 @@
           "name": "List Teams",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/teams",
             "description": "Lists organization teams. Requires teams.read. Expected status: 200."
           },
@@ -564,13 +775,23 @@
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Engineering\",\n  \"description\": \"Platform work\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/teams",
             "description": "Creates a team. Requires teams.manage. Expected status: 201."
@@ -594,7 +815,12 @@
           "name": "Get Team Members",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/teams/{{team_id}}/members",
             "description": "Lists team members. Requires teams.read. Expected status: 200."
           },
@@ -605,13 +831,23 @@
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"user_id\": \"{{user_id}}\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/teams/{{team_id}}/members",
             "description": "Adds an active organization member. Requires teams.manage. Expected status: 201."
@@ -635,7 +871,12 @@
           "name": "Remove Team Member",
           "request": {
             "method": "DELETE",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/teams/{{team_id}}/members/{{team_member_id}}",
             "description": "Removes a team membership. Requires teams.manage. Expected status: 200."
           },
@@ -650,7 +891,12 @@
           "name": "List Projects",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects?page=1&page_size=20&sort=created_at&order=desc",
             "description": "Lists projects with filtering, sorting, and pagination. Requires projects.read."
           },
@@ -661,13 +907,23 @@
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Website Redesign\",\n  \"description\": \"Public website refresh\",\n  \"status\": \"planning\",\n  \"priority\": \"high\",\n  \"team_id\": \"{{team_id}}\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects",
             "description": "Creates a project. Requires projects.create."
@@ -691,7 +947,12 @@
           "name": "Project Activity",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects/{{project_id}}/activity",
             "description": "Lists project activity. Requires projects.read."
           },
@@ -706,7 +967,12 @@
           "name": "List Tasks",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/tasks?page=1&page_size=20&sort=due_date&order=asc",
             "description": "Lists the organization's tasks with filtering, sorting, and pagination. Requires tasks.read."
           },
@@ -716,7 +982,12 @@
           "name": "List Tasks By Project",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects/{{project_id}}/tasks?page=1&page_size=20&sort=created_at&order=desc",
             "description": "Lists the tasks of one project. The project comes from the URL, so a project_id query parameter cannot widen the result. Requires tasks.read."
           },
@@ -727,13 +998,23 @@
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"title\": \"Ship the billing page\",\n  \"description\": \"Behind the feature flag\",\n  \"status\": \"in_progress\",\n  \"priority\": \"high\",\n  \"assignee_id\": \"{{user_id}}\",\n  \"due_date\": \"2026-12-24\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects/{{project_id}}/tasks",
             "description": "Creates a task in a project. The assignee must be an active member of the organization. Requires tasks.create."
@@ -757,7 +1038,12 @@
           "name": "Get Task",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/tasks/{{task_id}}",
             "description": "Reads a task. Requires tasks.read."
           },
@@ -768,13 +1054,23 @@
           "request": {
             "method": "PATCH",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"status\": \"done\",\n  \"assignee_id\": null\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/tasks/{{task_id}}",
             "description": "Updates a task, including reassignment. Send null to clear a field; omit it to keep the current value. Requires tasks.update."
@@ -785,7 +1081,12 @@
           "name": "Task Activity",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/tasks/{{task_id}}/activity?page=1&page_size=20",
             "description": "Lists append-only task activity. Requires tasks.read."
           },
@@ -795,7 +1096,12 @@
           "name": "Delete Task",
           "request": {
             "method": "DELETE",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/tasks/{{task_id}}",
             "description": "Deletes a task. Requires tasks.delete."
           },
@@ -811,13 +1117,23 @@
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"newcomer@example.com\",\n  \"role_id\": \"{{role_id}}\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations",
             "description": "Invites an email address to the organization with the given role. Requires members.manage. The response never contains the invitation link; it is only emailed."
@@ -841,7 +1157,12 @@
           "name": "List Invitations",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations?page=1&page_size=20&status=pending&sort=created_at&order=desc",
             "description": "Lists invitations with filtering, sorting, and pagination. Requires members.manage."
           },
@@ -851,7 +1172,12 @@
           "name": "Resend Invitation",
           "request": {
             "method": "POST",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations/{{invitation_id}}/resend",
             "description": "Issues a new link for a pending invitation and invalidates the previous one. Requires members.manage."
           },
@@ -861,7 +1187,12 @@
           "name": "Revoke Invitation",
           "request": {
             "method": "POST",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/invitations/{{invitation_id}}/revoke",
             "description": "Revokes a pending invitation. Requires members.manage."
           },
@@ -870,9 +1201,16 @@
         {
           "name": "Preview Invitation",
           "request": {
-            "auth": {"type": "noauth"},
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/invitations/{{invitation_token}}",
             "description": "Previews an invitation. Public: the token is the credential. Returns the organization, role, status, expiry, and whether the invitee already has an account."
           },
@@ -881,16 +1219,28 @@
         {
           "name": "Accept Invitation (new account)",
           "request": {
-            "auth": {"type": "noauth"},
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"token\": \"{{invitation_token}}\",\n  \"password\": \"PostmanPassword123!\",\n  \"first_name\": \"Ada\",\n  \"last_name\": \"Newcomer\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/invitations/accept",
             "description": "Accepts an invitation, creating the account, membership, and a session in one step. Use only when the invitee has no account yet; otherwise send just the token with a bearer access token."
@@ -902,13 +1252,23 @@
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"token\": \"{{invitation_token}}\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/invitations/accept",
             "description": "Accepts an invitation as the signed-in user. The access token's email must match the invited address. Returns a new session for the joined organization."
@@ -925,13 +1285,23 @@
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"CI pipeline\",\n  \"expires_in_days\": 30\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/api-keys",
             "description": "Creates an API key for the caller. Requires api_keys.manage. The response contains the secret exactly once; store it in the api_key variable."
@@ -957,7 +1327,12 @@
           "name": "List API Keys",
           "request": {
             "method": "GET",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/api-keys?page=1&page_size=20&include_revoked=true&sort=created_at&order=desc",
             "description": "Lists API keys with identifiers only. Requires api_keys.manage."
           },
@@ -967,7 +1342,12 @@
           "name": "Revoke API Key",
           "request": {
             "method": "DELETE",
-            "header": [{"key": "Accept", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/api-keys/{{api_key_id}}",
             "description": "Revokes an API key immediately. Requires api_keys.manage."
           },
@@ -976,11 +1356,19 @@
         {
           "name": "List Projects With API Key",
           "request": {
-            "auth": {"type": "noauth"},
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [
-              {"key": "X-API-Key", "value": "{{api_key}}"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects?page=1&page_size=20",
             "description": "Reads projects using the API key instead of a bearer token. A key only works on routes under the organization it was created in."
@@ -990,17 +1378,32 @@
         {
           "name": "Create Project With API Key",
           "request": {
-            "auth": {"type": "noauth"},
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              {"key": "X-API-Key", "value": "{{api_key}}"},
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Accept", "value": "application/json"}
+              {
+                "key": "X-API-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Created by the CI pipeline\",\n  \"priority\": \"medium\"\n}",
-              "options": {"raw": {"language": "json"}}
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": "{{base_url}}/api/v1/organizations/{{organization_id}}/projects",
             "description": "Writes as the key's creator, using that user's current role and permissions. Fails with 401 after the key is revoked or expires, or on any other organization."

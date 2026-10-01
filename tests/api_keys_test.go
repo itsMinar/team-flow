@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/itsMinar/team-flow/internal/apikeys"
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/authctx"
 	"github.com/itsMinar/team-flow/internal/httpx"
 	"github.com/itsMinar/team-flow/internal/organizations"
@@ -25,7 +26,7 @@ func TestAPIKeysOneTimeDisplayAuthenticationAndRevocation(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	orgSvc := organizations.NewService(pool, logger)
 	projectSvc := projects.NewService(pool, orgSvc)
-	svc := apikeys.NewService(pool, orgSvc, 90*24*time.Hour, 365*24*time.Hour, logger)
+	svc := apikeys.NewService(pool, orgSvc, audit.NopRecorder(), 90*24*time.Hour, 365*24*time.Hour, logger)
 	firstPage := httpx.PageRequest{Page: 1, PageSize: httpx.DefaultPageSize}
 
 	userA, orgA := registerOrg(t, pool, "key-a@example.com", "API Keys Org A")

@@ -17,12 +17,14 @@ type Querier interface {
 	CountAPIKeys(ctx context.Context, arg CountAPIKeysParams) (int64, error)
 	CountActiveOwners(ctx context.Context, organizationID uuid.UUID) (int64, error)
 	CountActivityByResource(ctx context.Context, arg CountActivityByResourceParams) (int64, error)
+	CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) (int64, error)
 	CountInvitations(ctx context.Context, arg CountInvitationsParams) (int64, error)
 	CountMembershipsByRole(ctx context.Context, arg CountMembershipsByRoleParams) (int64, error)
 	CountProjects(ctx context.Context, arg CountProjectsParams) (int64, error)
 	CountTasks(ctx context.Context, arg CountTasksParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateActivityLog(ctx context.Context, arg CreateActivityLogParams) error
+	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error)
 	CreateInvitation(ctx context.Context, arg CreateInvitationParams) (Invitation, error)
 	CreateMembership(ctx context.Context, arg CreateMembershipParams) (OrganizationMembership, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
@@ -75,6 +77,12 @@ type Querier interface {
 	// inside each organization's own transaction.
 	ListActiveOrganizationIDs(ctx context.Context, rowLimit int64) ([]uuid.UUID, error)
 	ListActivityByResource(ctx context.Context, arg ListActivityByResourceParams) ([]ActivityLog, error)
+	// Reads are always tenant-scoped; rows without an organization are excluded by the
+	// RLS select policy and can never be reached through this query.
+	// ip_address is selected as text: pgx cannot scan the inet type into a Go string,
+	// and the text form is what the API exposes anyway. An absent address becomes an
+	// empty string, which the client-facing entry omits.
+	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]ListAuditLogsRow, error)
 	// Expired keys that have been dead long enough to be worth revoking. The grace
 	// period keeps recently expired keys visible for an operator to review.
 	ListExpiredAPIKeys(ctx context.Context, arg ListExpiredAPIKeysParams) ([]ApiKey, error)

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/itsMinar/team-flow/internal/apikeys"
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/health"
@@ -90,7 +91,7 @@ func TestRouter_TenantModulesRequireAuth(t *testing.T) {
 		Logger:       logger,
 		Health:       health.NewHandler(logger, map[string]health.Checker{}),
 		AuthMW:       auth.NewMiddleware(auth.NewJWTService("router-test-secret", "teamflow", time.Minute), logger),
-		OrgHandler:   organizations.NewHandler(nil, logger),
+		OrgHandler:   organizations.NewHandler(nil, audit.NopRecorder(), logger),
 		OrgMW:        organizations.NewMiddleware(nil, logger),
 		TeamsHandler: teams.NewHandler(nil, logger),
 		Projects:     projects.NewHandler(nil, logger),

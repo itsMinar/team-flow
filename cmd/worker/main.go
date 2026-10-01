@@ -11,18 +11,22 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/itsMinar/team-flow/internal/apikeys"
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/cache"
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/database"
+	gendb "github.com/itsMinar/team-flow/internal/db"
 	"github.com/itsMinar/team-flow/internal/invitations"
 	"github.com/itsMinar/team-flow/internal/jobs"
 	"github.com/itsMinar/team-flow/internal/mailer"
+	"github.com/itsMinar/team-flow/internal/metrics"
 	"github.com/itsMinar/team-flow/internal/observability"
 	"github.com/itsMinar/team-flow/internal/organizations"
 )
@@ -88,21 +92,36 @@ func run() error {
 		logger.Warn("mail transport disabled; invitation emails will be dropped")
 	}
 
+	// The worker records the same audit events as the API for the actions it
+	// performs itself, such as delivering an invitation or rotating a token.
+	appMetrics := metrics.New()
+	auditRecorder := audit.NewSQLRecorder(gendb.New(db.Pool), appMetrics, logger)
+	metricsCtx, stopMetrics := context.WithCancel(ctx)
+	defer stopMetrics()
+	if cfg.Metrics.Enabled {
+		go serveMetrics(metricsCtx, cfg.Metrics.Addr, appMetrics.Handler(), logger)
+	}
+
 	orgService := organizations.NewService(db.Pool, logger)
-	invitationService := invitations.NewService(db.Pool, orgService, nil, mailSender, nil,
+	invitationService := invitations.NewService(db.Pool, orgService, nil, mailSender, nil, auditRecorder,
 		cfg.Invite.TTL, cfg.Invite.BaseURL, logger)
-	apiKeyService := apikeys.NewService(db.Pool, orgService, cfg.APIKey.DefaultTTL, cfg.APIKey.MaxTTL, logger)
+	apiKeyService := apikeys.NewService(db.Pool, orgService, auditRecorder,
+		cfg.APIKey.DefaultTTL, cfg.APIKey.MaxTTL, logger)
 
 	worker := jobs.NewWorker(queue, jobs.WorkerOptions{
 		Concurrency:     cfg.Worker.Concurrency,
 		BlockTimeout:    cfg.Worker.BlockTimeout,
 		StaleAfter:      cfg.Worker.StaleAfter,
 		ShutdownTimeout: cfg.Worker.ShutdownTimeout,
+		Metrics:         appMetrics,
 	}, logger)
 	registerHandlers(ctx, queue, worker, invitationService, apiKeyService)
 
 	if err := queue.EnsureGroup(ctx); err != nil {
 		return fmt.Errorf("prepare job queue: %w", err)
+	}
+	if err := publishQueueDepth(ctx, queue, appMetrics, logger); err != nil {
+		logger.Warn("could not read queue depth", slog.Any("error", err))
 	}
 	if promoted, err := queue.PromoteDue(ctx, 100); err != nil {
 		logger.Warn("could not promote delayed jobs at startup", slog.Any("error", err))
@@ -116,6 +135,51 @@ func run() error {
 	}
 	logger.Info("shutdown complete")
 	return nil
+}
+
+// publishQueueDepth records the current queue depth so a stalled queue is visible
+// without inspecting Redis by hand.
+func publishQueueDepth(ctx context.Context, queue *jobs.Queue, m *metrics.Metrics, logger *slog.Logger) error {
+	stats, err := queue.Stats(ctx)
+	if err != nil {
+		return err
+	}
+	m.SetQueueDepth("ready", stats.StreamLength)
+	m.SetQueueDepth("retry", stats.RetryDue)
+	m.SetQueueDepth("dead", stats.DeadLength)
+	logger.Debug("queue depth published",
+		slog.Int64("ready", stats.StreamLength),
+		slog.Int64("pending", stats.Pending),
+		slog.Int64("retry", stats.RetryDue),
+		slog.Int64("dead", stats.DeadLength))
+	return nil
+}
+
+// serveMetrics exposes the worker's own metrics on a separate listener, because
+// the worker has no API port. The address is expected to be reachable only from
+// the monitoring network.
+func serveMetrics(ctx context.Context, addr string, handler http.Handler, logger *slog.Logger) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", handler)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":{"status":"ok"}}`))
+	})
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+	}()
+	logger.Info("worker metrics listening", slog.String("addr", addr))
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Error("worker metrics listener stopped", slog.Any("error", err))
+	}
 }
 
 // registerHandlers binds every job type the worker understands and seeds the

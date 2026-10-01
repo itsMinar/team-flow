@@ -7,7 +7,7 @@ infrastructure while their data stays strictly isolated.
 This repository is being built incrementally, phase by phase. **Phases 1
 (Foundation), 2 (Authentication), 3 (Multi-tenancy), 4 (RBAC), 5 (Teams), 6
 (Projects), 7 (Tasks), 8 (Invitations), 9 (API keys), 10 (Background jobs), and
-11 (Rate limiting) are complete.** See
+11 (Rate limiting), and 12 (Audit and observability) are complete.** See
 [Roadmap](#roadmap) for what is done and what comes next.
 
 ## Overview
@@ -68,14 +68,16 @@ internal/
   db/          Generated sqlc queries and models
   fieldtypes/  Shared calendar-date and partial-update field types
   health/      Liveness and readiness handlers
+  audit/       Append-only security audit log and its read API
   jobs/        Redis job queue, worker pool, retries, dead letters
+  metrics/     Prometheus registry, HTTP metrics, and the exposition handler
   ratelimit/   Redis token-bucket limiter and its HTTP middleware
   httpx/       Response envelope + typed error mapping
   invitations/ Organization invitations, acceptance, and token lifecycle
   permissions/  Permission keys and default role grants
   mailer/      Transactional email sender interface and transports
   middleware/  Reusable HTTP middleware
-  observability/ Structured logging (and later metrics/tracing)
+  observability/ Structured logging, request correlation, trace propagation
   organizations/ Organizations, memberships, roles, and tenant resolution
   projects/    Organization-scoped projects and project activity
   tasks/       Project-scoped tasks, assignment, and task activity
@@ -230,7 +232,9 @@ already-issued access tokens: those remain valid until their expiration.
   status, duration, and a correlating `request_id`.
 - Every request is assigned an `X-Request-ID` (honored if the client supplies
   one) and it is propagated through `context.Context`.
-- Metrics and optional tracing are added in a later phase.
+- Every log line carries the request ID and the trace ID of its request.
+- Prometheus metrics are exposed at `/metrics`; see
+  [Audit and observability](#audit-and-observability).
 
 ## Health checks
 
@@ -264,6 +268,7 @@ Bearer access token:
 | POST   | `/organizations/{orgID}/roles`                       | `roles.manage`         | Create a custom role                                     |
 | PATCH  | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Update a custom role and permissions                     |
 | DELETE | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Delete an unused custom role                             |
+| GET    | `/organizations/{orgID}/audit-logs`                   | `audit.read`           | Read the organization's append-only audit log           |
 
 Teams are organization-scoped and use the `teams.read` and `teams.manage`
 permissions:
@@ -424,6 +429,55 @@ registration, organization switching), the policies remain permissive so those
 flows keep working. Background work runs in `cmd/worker`; see
 [Background jobs](#background-jobs).
 
+## Audit and observability
+
+**Audit log.** `GET /api/v1/organizations/{orgID}/audit-logs` returns an
+organization's security history, newest first, paginated and filterable by
+`action`, `outcome`, `actor_user_id`, and `since` (bounded to 90 days). It
+requires the new `audit.read` permission, granted to Owner and Admin.
+
+Recorded events: registration, login success and failure, token refresh and
+refresh-token reuse, logout and logout-all, organization create and rename, role
+create, update and delete, member role assignment, invitation create, resend,
+revoke and accept, and API key create and revoke.
+
+- **Append-only.** The application role gets `SELECT` and `INSERT` only;
+  `UPDATE` and `DELETE` are revoked, so neither an operator nor a bug can rewrite
+  history.
+- **No cascade delete.** `organization_id` has no foreign key, so deleting an
+  organization cannot erase the record of who changed access while it existed.
+- **Authentication events belong to no organization**, because a failed login is
+  not tied to a tenant. They are stored for an operator and are never returned by
+  the tenant-scoped API.
+- **Recorded where the change happens.** Credential and invitation events are
+  written inside the transaction that makes the change, so a minted API key can
+  never exist without a record of it. Everything else is written best effort: a
+  failed audit write is logged and counted, never returned to the caller.
+
+**Metrics.** `GET /metrics` serves the Prometheus text format, and the worker
+serves the same endpoint on `METRICS_ADDR` (default `:9091`) because it has no
+API port. Exported series:
+
+| Metric                                   | Labels                    | Meaning                                  |
+| ---------------------------------------- | ------------------------- | ---------------------------------------- |
+| `teamflow_http_requests_total`           | method, route, status     | Request count by route pattern           |
+| `teamflow_http_request_duration_seconds` | method, route             | Latency histogram                        |
+| `teamflow_http_requests_in_flight`       | —                         | Requests being served                    |
+| `teamflow_audit_events_total`            | action, outcome           | Audit events recorded                    |
+| `teamflow_jobs_processed_total`          | type, result              | Job outcomes, including dead-lettered    |
+| `teamflow_jobs_duration_seconds`         | type                      | Job execution time                       |
+| `teamflow_jobs_queue_depth`              | queue                     | Ready, retrying, and dead-lettered depth |
+
+Route labels are chi route patterns, never raw paths, so a metric cannot explode
+into one series per resource ID. Go runtime and process metrics are included.
+Restrict `/metrics` to the monitoring network at the edge.
+
+**Tracing.** Every request adopts a W3C `traceparent` when a valid one is
+supplied and generates a trace ID otherwise, echoes it back as `X-Trace-Id`, and
+attaches both the request ID and the trace ID to every log line. No exporter is
+registered, so nothing is sampled or shipped unless an operator asks for it; an
+OpenTelemetry exporter can be added later without changing any of this.
+
 ## Rate limiting
 
 Rate limits are token buckets evaluated atomically inside Redis with a Lua
@@ -516,7 +570,8 @@ redis-cli XLEN  teamflow:jobs:dead     # dead-lettered jobs
       dead-letter handling
 - [x] Phase 11 — Rate limiting: Redis token buckets for authentication, users, and
       API keys
-- [ ] Phase 12 — Audit & observability
+- [x] Phase 12 — Audit and observability: append-only audit log, Prometheus
+      metrics, and trace propagation
 - [ ] Phase 13 — Testing
 - [ ] Phase 14 — Production hardening
 

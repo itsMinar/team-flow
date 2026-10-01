@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/db"
 	"github.com/itsMinar/team-flow/internal/httpx"
 	"github.com/itsMinar/team-flow/internal/permissions"
@@ -32,14 +33,22 @@ type Service struct {
 	q          *db.Queries
 	jwt        *JWTService
 	refreshTTL time.Duration
+	audit      audit.Recorder
 	logger     *slog.Logger
 }
 
-// NewService constructs the auth Service.
-func NewService(pool *pgxpool.Pool, jwt *JWTService, refreshTTL time.Duration, logger *slog.Logger) *Service {
+// NewService constructs the auth Service. Security-relevant authentication events
+// are recorded through the audit log; pass audit.NopRecorder() to disable it.
+func NewService(pool *pgxpool.Pool, jwt *JWTService, refreshTTL time.Duration,
+	recorder audit.Recorder, logger *slog.Logger,
+) *Service {
+	if recorder == nil {
+		recorder = audit.NopRecorder()
+	}
 	return &Service{
 		pool:       pool,
 		q:          db.New(pool),
+		audit:      recorder,
 		jwt:        jwt,
 		refreshTTL: refreshTTL,
 		logger:     logger,
@@ -140,6 +149,13 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, meta RequestMe
 		return nil, fmt.Errorf("commit tx: %w", err)
 	}
 
+	s.audit.Record(ctx, audit.Event{
+		Action: audit.AuthRegistered, ActorUserID: &user.ID, TargetType: audit.TargetUser,
+		TargetID: user.ID.String(), OrganizationID: &org.ID,
+	}.WithRequest(meta.IPAddress, meta.UserAgent, "", "").WithMetadata(map[string]any{
+		"email": user.Email,
+	}))
+
 	tokens, err := s.issueSession(ctx, user.ID, uuid.New(), meta)
 	if err != nil {
 		return nil, err
@@ -150,26 +166,42 @@ func (s *Service) Register(ctx context.Context, in RegisterInput, meta RequestMe
 // Login verifies credentials and issues a new session. It returns a generic
 // unauthorized error for any failure to avoid user enumeration.
 func (s *Service) Login(ctx context.Context, in LoginInput, meta RequestMeta) (*AuthResult, error) {
+	// A failed login is recorded without an organization, because the account is
+	// either unknown or the attempt failed, and with no password or attempted
+	// address in the metadata: the log must not become a list of what was guessed.
+	denied := audit.Event{
+		Action: audit.AuthLoginFailed, Outcome: audit.OutcomeFailure,
+		TargetType: audit.TargetUser,
+	}.WithRequest(meta.IPAddress, meta.UserAgent, "", "")
+
 	user, err := s.q.GetUserByEmail(ctx, in.Email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Run a dummy verify to reduce timing side-channels, then fail.
 			_ = VerifyPassword("$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidin", in.Password)
+			s.audit.Record(ctx, denied)
 			return nil, invalidCredentials()
 		}
 		return nil, fmt.Errorf("get user by email: %w", err)
 	}
 
 	if user.Status != activeUserStatus {
+		s.audit.Record(ctx, denied)
 		return nil, invalidCredentials()
 	}
 	if !VerifyPassword(user.PasswordHash, in.Password) {
+		s.audit.Record(ctx, denied.WithActor(user.ID).WithTarget(audit.TargetUser, user.ID.String()))
 		return nil, invalidCredentials()
 	}
 
 	if err := s.q.UpdateUserLastLogin(ctx, user.ID); err != nil {
 		return nil, fmt.Errorf("update last login: %w", err)
 	}
+
+	s.audit.Record(ctx, audit.Event{
+		Action: audit.AuthLoginSucceeded, ActorUserID: &user.ID,
+		TargetType: audit.TargetUser, TargetID: user.ID.String(),
+	}.WithRequest(meta.IPAddress, meta.UserAgent, "", ""))
 
 	tokens, err := s.issueSession(ctx, user.ID, uuid.New(), meta)
 	if err != nil {
@@ -206,6 +238,13 @@ func (s *Service) Refresh(ctx context.Context, rawToken string, meta RequestMeta
 		if err := tx.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("commit token family revocation: %w", err)
 		}
+		s.audit.Record(ctx, audit.Event{
+			Action: audit.AuthTokenReuseDetected, Outcome: audit.OutcomeDenied,
+			ActorUserID: &stored.UserID, TargetType: audit.TargetRefreshToken,
+			TargetID: stored.ID.String(),
+		}.WithRequest(meta.IPAddress, meta.UserAgent, "", "").WithMetadata(map[string]any{
+			"family_id": stored.FamilyID.String(),
+		}))
 		s.logger.Warn("refresh token reuse detected",
 			slog.String("user_id", stored.UserID.String()),
 			slog.String("family_id", stored.FamilyID.String()),
@@ -243,6 +282,11 @@ func (s *Service) Refresh(ctx context.Context, rawToken string, meta RequestMeta
 	if err != nil {
 		return nil, err
 	}
+	s.audit.Record(ctx, audit.Event{
+		Action: audit.AuthTokensRefreshed, ActorUserID: &user.ID,
+		TargetType: audit.TargetRefreshToken, TargetID: newRefresh.id.String(),
+	}.WithRequest(meta.IPAddress, meta.UserAgent, "", ""))
+
 	return &AuthResult{
 		Tokens: TokenPair{
 			AccessToken:  access,
@@ -276,6 +320,10 @@ func (s *Service) LogoutAll(ctx context.Context, userID uuid.UUID) error {
 	if err := s.q.RevokeAllUserRefreshTokens(ctx, userID); err != nil {
 		return fmt.Errorf("revoke all refresh tokens: %w", err)
 	}
+	s.audit.Record(ctx, audit.Event{
+		Action: audit.AuthLoggedOutAll, ActorUserID: &userID, TargetType: audit.TargetUser,
+		TargetID: userID.String(),
+	})
 	return nil
 }
 

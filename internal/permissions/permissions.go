@@ -20,6 +20,7 @@ const (
 	TasksUpdate         = "tasks.update"
 	TasksDelete         = "tasks.delete"
 	APIKeysManage       = "api_keys.manage"
+	AuditRead           = "audit.read"
 )
 
 var readOnly = []string{OrganizationsRead, MembersRead, RolesRead, TeamsRead, ProjectsRead, TasksRead}
@@ -34,6 +35,7 @@ func All() []string {
 		ProjectsRead, ProjectsCreate, ProjectsUpdate, ProjectsDelete,
 		TasksRead, TasksCreate, TasksUpdate, TasksDelete,
 		APIKeysManage,
+		AuditRead,
 	}
 }
 

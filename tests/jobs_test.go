@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/itsMinar/team-flow/internal/apikeys"
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/invitations"
 	"github.com/itsMinar/team-flow/internal/jobs"
@@ -157,9 +158,8 @@ func invitationsService(t *testing.T, pool *pgxpool.Pool, orgSvc *organizations.
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	jwt := auth.NewJWTService("integration-secret", "teamflow", 15*time.Minute)
-	authSvc := auth.NewService(pool, jwt, 720*time.Hour, logger)
-	return invitations.NewService(pool, orgSvc, authSvc, sender, queue,
-		7*24*time.Hour, "http://app.example.com", logger)
+	authSvc := auth.NewService(pool, jwt, 720*time.Hour, audit.NopRecorder(), logger)
+	return invitations.NewService(pool, orgSvc, authSvc, sender, queue, audit.NopRecorder(), 7*24*time.Hour, "http://app.example.com", logger)
 }
 
 func invitationsCreate(roleID uuid.UUID, email string) invitations.CreateInput {
@@ -345,7 +345,7 @@ func TestAPIKeyExpirySweepRevokesDeadKeys(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	orgSvc := organizations.NewService(pool, logger)
-	svc := apikeys.NewService(pool, orgSvc, 90*24*time.Hour, 365*24*time.Hour, logger)
+	svc := apikeys.NewService(pool, orgSvc, audit.NopRecorder(), 90*24*time.Hour, 365*24*time.Hour, logger)
 
 	userID, orgID := registerOrg(t, pool, "job-keys@example.com", "Job Keys Org")
 	longDead, err := svc.Create(ctx, userID, orgID, apikeys.CreateInput{Name: "Long dead"})

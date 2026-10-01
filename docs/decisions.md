@@ -2,6 +2,124 @@
 
 Short records of notable engineering decisions. Newest first within each phase.
 
+## Phase 12 — Audit and observability
+
+### The audit log is a separate table from the activity log, not a view over it
+
+Activity logs answer "what happened to this project" for people working in the
+product. The audit log answers "who authenticated, who changed access, and which
+credentials exist" for someone answering an incident or a compliance question.
+Those differ in reader, in retention, and in what must never change: an activity
+row is created and left alone, but an audit row has to be provably unrewritable
+by anyone, and it has to survive the deletion of the tenant it describes.
+
+Merging them would have forced one table to serve both audiences, which means
+either letting a tenant-scoped reader see authentication history that belongs to
+no tenant, or weakening the append-only guarantee for activity rows.
+
+### Append-only is enforced by grants, not by convention
+
+The application role receives `SELECT` and `INSERT` on `audit_logs` and no
+`UPDATE` or `DELETE`. That is the only guarantee that survives a bug, a
+compromised service, and a person at a terminal with psql. Application-level "we
+never update these" is a comment.
+
+The consequence worth accepting is that mistakes are permanent. A failed login
+that recorded an address which turned out to be a proxy cannot be deleted, so the
+recorder stores only what it is confident about: never a password, never a token,
+and for API keys only the name and prefix. Retention stays a future operational
+decision instead of something the schema silently assumes.
+
+### Audit rows outlive their organization, on purpose
+
+`organization_id` carries no foreign key. Every other tenant table cascades, and
+following that pattern here would have been consistent and wrong: an owner who
+wants to erase the record of who they promoted and demoted would delete the
+organization and take the evidence with it.
+
+Deleting an organization therefore leaves its audit rows behind, reachable only
+through operator queries. That trades storage and an intentional asymmetry for the
+property that an access trail cannot be erased by the person it implicates. The
+API never exposes such rows, because the read query always filters on
+organization.
+
+### Events belong to no organization when they are not about one
+
+A login attempt against an unknown address has no tenant: the address is not an
+account, and inventing an organization for it would both corrupt the tenant model
+and let a scan against random addresses write into an arbitrary tenant's history.
+Those rows are stored with a null organization and are visible only to an
+operator.
+
+The read API filters on `organization_id` inside a tenant transaction, so the
+permission check, the query, and the RLS clause all agree on the same scope.
+
+### RLS treats an empty tenant setting the same as an absent one
+
+A session that has run a tenant transaction reports `app.current_org_id` as an
+empty string afterwards, not as unset. A policy that only checks for "no tenant
+context" therefore stops matching after the first transaction on a pooled
+connection, and the application sees zero rows and failed inserts without any
+error in its own code. Both forms are treated as no tenant, and the policies
+follow the same permissive shape as the rest of the schema: tenant-scoped when a
+context is present, unrestricted when it is not, with the explicit
+`organization_id` filter as the scoping mechanism.
+
+This is invisible while tests run as the table owner, because the owner bypasses
+RLS. It surfaced only when the suite ran as `teamflow_app`, which is the role the
+API actually uses.
+
+### Credential and invitation events are recorded inside the write transaction
+
+A generated API key is shown exactly once. If its audit row were written after
+the transaction committed and the process died in between, a live credential
+would exist with no record of it. API key and invitation events are therefore
+written with the same transaction that mints or consumes them.
+
+Everything else is recorded best effort. A failed audit write is logged and
+counted but never returned to the caller, because refusing a completed login
+because the audit table was briefly unavailable turns a logging dependency into
+an availability dependency on the whole product.
+
+### The recorder takes an interface so audit stays out of the dependency graph
+
+`auth`, `organizations`, `invitations`, and `apikeys` all record events, and
+`audit` needs the authorization stack to enforce `audit.read`. Wiring that
+directly would be a cycle. The read service therefore depends on a one-method
+`Authorizer` interface declared in `audit` and satisfied by the real authorizer,
+which keeps the dependency pointing one way and lets each feature take a
+`Recorder` interface with a no-op implementation, so tests do not need a database
+to assert on unrelated behaviour.
+
+### Metrics live in a private registry, not the default one
+
+`prometheus.DefaultRegisterer` is process-global, so registering collectors at
+init makes a second registry panic and leaks state across tests. The project uses
+its own `prometheus.Registry`, which also means the exposition contains exactly
+the project's own metrics plus the Go runtime and process collectors, and nothing
+from a library that happened to register a default.
+
+### Route labels use chi route patterns, never raw paths
+
+Labelling with `r.URL.Path` would mint one series per project, task, and user, so
+a single busy tenant could exhaust a Prometheus server's memory. The chi route
+pattern is a fixed, bounded set, and the test asserts that two requests to
+different resource IDs produce the same label value. The obvious corollary is
+that a metric cannot tell you which tenant is slow; tenant detail belongs in the
+audit log, not in a metric dimension.
+
+### Trace identifiers propagate, but nothing is exported
+
+Each request adopts a valid incoming W3C `traceparent` or generates a trace id,
+echoes it back as `X-Trace-Id`, and attaches both it and the request id to every
+log line. No exporter is registered and no sampler runs, so there is no cost and
+no data leaving the process until an operator asks for it.
+
+Shipping a collector by default would have meant choosing a vendor, a sampling
+rate, and a retention policy as part of a phase whose job is to make the system
+observable. Every later exporter can be added without changing this middleware,
+because the identifiers are already correlated end to end.
+
 ## Phase 11 — Rate limiting
 
 ### Token buckets evaluated in Redis, not counted in the application

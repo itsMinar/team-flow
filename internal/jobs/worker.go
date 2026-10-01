@@ -28,6 +28,15 @@ type WorkerOptions struct {
 	// PromoteInterval overrides how often due retries are promoted and stale work
 	// is reclaimed.
 	PromoteInterval time.Duration
+	// Metrics receives per-job observations. It is an interface so this package
+	// does not depend on the metrics package, and may be nil.
+	Metrics JobObserver
+}
+
+// JobObserver receives per-job outcomes for metrics.
+type JobObserver interface {
+	CountJob(jobType, result string)
+	ObserveJob(jobType string, d time.Duration)
 }
 
 // Backend is the queue surface the worker depends on. Depending on the interface
@@ -220,6 +229,7 @@ func (w *Worker) handle(ctx context.Context, consumer string, delivery Delivery)
 		// The payload could not be decrypted or parsed, so nothing can be done
 		// with it beyond removing it from the queue.
 		w.logger.Error("dropping unreadable job", slog.String("stream_id", delivery.ID))
+		w.observe("unreadable", "dead_lettered", time.Now())
 		if err := w.queue.Fail(ctx, delivery, Permanent(errors.New("job payload is unreadable"))); err != nil {
 			w.logger.Error("dead-lettering unreadable job failed", slog.Any("error", err))
 		}
@@ -231,6 +241,7 @@ func (w *Worker) handle(ctx context.Context, consumer string, delivery Delivery)
 	if !ok {
 		w.logger.Error("no handler registered for job type",
 			slog.String("type", job.Type), slog.String("job_id", job.ID))
+		w.observe(job.Type, "unhandled", started)
 		if err := w.queue.Fail(ctx, delivery, Permanent(fmt.Errorf("no handler for %q", job.Type))); err != nil {
 			w.logger.Error("dead-lettering job failed", slog.Any("error", err))
 		}
@@ -247,6 +258,11 @@ func (w *Worker) handle(ctx context.Context, consumer string, delivery Delivery)
 	if err := handler(ctx, job); err != nil {
 		attrs = append(attrs, slog.Any("error", err), slog.Duration("duration", time.Since(started)))
 		w.logger.Warn("job failed", attrs...)
+		result := "failed"
+		if IsPermanent(err) || job.Attempts+1 >= job.MaxAttempts {
+			result = "dead_lettered"
+		}
+		w.observe(job.Type, result, started)
 		if failErr := w.queue.Fail(ctx, delivery, err); failErr != nil {
 			w.logger.Error("recording job failure failed", slog.Any("error", failErr))
 		}
@@ -259,6 +275,16 @@ func (w *Worker) handle(ctx context.Context, consumer string, delivery Delivery)
 		return
 	}
 	w.logger.Info("job completed", append(attrs, slog.Duration("duration", time.Since(started)))...)
+	w.observe(job.Type, "completed", started)
+}
+
+// observe reports a job outcome to the metrics observer, if one is configured.
+func (w *Worker) observe(jobType, result string, started time.Time) {
+	if w.opts.Metrics == nil {
+		return
+	}
+	w.opts.Metrics.CountJob(jobType, result)
+	w.opts.Metrics.ObserveJob(jobType, time.Since(started))
 }
 
 // sleepCtx waits for d, reporting false if the context ended first.

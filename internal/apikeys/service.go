@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/authctx"
 	"github.com/itsMinar/team-flow/internal/database"
 	"github.com/itsMinar/team-flow/internal/db"
@@ -28,17 +29,21 @@ type Service struct {
 	pool       *pgxpool.Pool
 	q          *db.Queries
 	orgs       *organizations.Service
+	audit      audit.Recorder
 	logger     *slog.Logger
 	defaultTTL time.Duration
 	maxTTL     time.Duration
 }
 
 // NewService constructs the API keys Service.
-func NewService(pool *pgxpool.Pool, orgs *organizations.Service,
+func NewService(pool *pgxpool.Pool, orgs *organizations.Service, recorder audit.Recorder,
 	defaultTTL, maxTTL time.Duration, logger *slog.Logger,
 ) *Service {
+	if recorder == nil {
+		recorder = audit.NopRecorder()
+	}
 	return &Service{
-		pool: pool, q: db.New(pool), orgs: orgs, logger: logger,
+		pool: pool, q: db.New(pool), orgs: orgs, audit: recorder, logger: logger,
 		defaultTTL: defaultTTL, maxTTL: maxTTL,
 	}
 }
@@ -86,8 +91,9 @@ func (s *Service) Create(ctx context.Context, userID, orgID uuid.UUID, in Create
 
 	var key db.ApiKey
 	err = s.withOrgTx(ctx, orgID, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
 		var err error
-		key, err = s.q.WithTx(tx).CreateAPIKey(ctx, db.CreateAPIKeyParams{
+		key, err = q.CreateAPIKey(ctx, db.CreateAPIKeyParams{
 			OrganizationID: orgID, CreatedBy: userID, Name: strings.TrimSpace(in.Name),
 			KeyPrefix: prefix, KeyLastFour: lastFour, KeyHash: hashKey(raw),
 			ExpiresAt: now.Add(ttl),
@@ -97,7 +103,12 @@ func (s *Service) Create(ctx context.Context, userID, orgID uuid.UUID, in Create
 		if err != nil {
 			return mapWriteError(err)
 		}
-		return nil
+		// The audit row commits with the key, so a minted credential can never
+		// exist without a record of it.
+		return s.audit.RecordTx(ctx, q, audit.Event{
+			Action: audit.APIKeyCreated, ActorUserID: &userID, OrganizationID: &orgID,
+			TargetType: audit.TargetAPIKey, TargetID: key.ID.String(),
+		}.WithMetadata(map[string]any{"name": key.Name, "key_prefix": prefix}))
 	})
 	if err != nil {
 		return CreatedResult{}, fmt.Errorf("create api key: %w", err)
@@ -175,7 +186,10 @@ func (s *Service) Revoke(ctx context.Context, userID, orgID, keyID uuid.UUID) er
 		}); err != nil {
 			return err
 		}
-		return nil
+		return s.audit.RecordTx(ctx, q, audit.Event{
+			Action: audit.APIKeyRevoked, ActorUserID: &userID, OrganizationID: &orgID,
+			TargetType: audit.TargetAPIKey, TargetID: keyID.String(),
+		}.WithMetadata(map[string]any{"name": current.Name, "key_prefix": current.KeyPrefix}))
 	})
 }
 

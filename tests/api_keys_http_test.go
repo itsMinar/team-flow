@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/itsMinar/team-flow/internal/apikeys"
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/organizations"
 )
@@ -41,7 +42,8 @@ func TestAPIKeyAuthenticationOverHTTP(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	orgSvc := organizations.NewService(pool, logger)
-	authSvc := auth.NewService(pool, auth.NewJWTService(secret, "teamflow", 15*time.Minute), 720*time.Hour, logger)
+	authSvc := auth.NewService(pool, auth.NewJWTService(secret, "teamflow", 15*time.Minute), 720*time.Hour,
+		audit.NopRecorder(), logger)
 
 	// An owner registers, then mints a key through the HTTP API.
 	registered, err := authSvc.Register(ctx, auth.RegisterInput{

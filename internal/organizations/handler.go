@@ -8,20 +8,43 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/authctx"
 	"github.com/itsMinar/team-flow/internal/httpx"
+	"github.com/itsMinar/team-flow/internal/observability"
 	"github.com/itsMinar/team-flow/internal/validation"
 )
 
 // Handler exposes organization HTTP endpoints.
 type Handler struct {
 	service *Service
+	audit   audit.Recorder
 	logger  *slog.Logger
 }
 
-// NewHandler constructs an organizations Handler.
-func NewHandler(service *Service, logger *slog.Logger) *Handler {
-	return &Handler{service: service, logger: logger}
+// NewHandler constructs an organizations Handler. Access-changing actions are
+// recorded in the audit log from the handler rather than the service, because the
+// audit package depends on the organizations service for authorization and a
+// service-level dependency would be circular.
+func NewHandler(service *Service, recorder audit.Recorder, logger *slog.Logger) *Handler {
+	if recorder == nil {
+		recorder = audit.NopRecorder()
+	}
+	return &Handler{service: service, audit: recorder, logger: logger}
+}
+
+// record writes an audit event for the current request. Audit failures never affect
+// the response; they are logged inside the recorder.
+func (h *Handler) record(r *http.Request, event audit.Event) {
+	ip := httpx.ClientIP(r)
+	traceID, _ := observability.TraceIDFromContext(r.Context())
+	event = event.WithRequest(ip, r.UserAgent(), requestID(r), traceID)
+	h.audit.Record(r.Context(), event)
+}
+
+func requestID(r *http.Request) string {
+	id, _ := observability.RequestIDFromContext(r.Context())
+	return id
 }
 
 func currentUserID(r *http.Request) (uuid.UUID, bool) {
@@ -74,6 +97,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
+	h.record(r, audit.Event{
+		Action: audit.OrganizationCreated, ActorUserID: &userID,
+		TargetType: audit.TargetOrganization, TargetID: org.ID.String(),
+	}.WithMetadata(map[string]any{"name": org.Name}))
 	httpx.WriteData(w, http.StatusCreated, org)
 }
 
@@ -128,6 +155,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
+	h.record(r, audit.Event{
+		Action: audit.OrganizationRenamed, ActorUserID: &userID, OrganizationID: &orgID,
+		TargetType: audit.TargetOrganization, TargetID: orgID.String(),
+	}.WithMetadata(map[string]any{"name": org.Name}))
 	httpx.WriteData(w, http.StatusOK, org)
 }
 
@@ -219,6 +250,10 @@ func (h *Handler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
+	h.record(r, audit.Event{
+		Action: audit.RoleCreated, ActorUserID: &userID, OrganizationID: &orgID,
+		TargetType: audit.TargetRole, TargetID: role.ID.String(),
+	}.WithMetadata(map[string]any{"name": role.Name, "permissions": len(role.Permissions)}))
 	httpx.WriteData(w, http.StatusCreated, role)
 }
 
@@ -256,6 +291,10 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
+	h.record(r, audit.Event{
+		Action: audit.RoleUpdated, ActorUserID: &userID, OrganizationID: &orgID,
+		TargetType: audit.TargetRole, TargetID: role.ID.String(),
+	}.WithMetadata(map[string]any{"name": role.Name, "permissions": role.Permissions}))
 	httpx.WriteData(w, http.StatusOK, role)
 }
 
@@ -279,6 +318,10 @@ func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
+	h.record(r, audit.Event{
+		Action: audit.RoleDeleted, ActorUserID: &userID, OrganizationID: &orgID,
+		TargetType: audit.TargetRole, TargetID: roleID.String(),
+	})
 	httpx.WriteData(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
@@ -314,5 +357,12 @@ func (h *Handler) AssignMemberRole(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, h.logger, err)
 		return
 	}
+	h.record(r, audit.Event{
+		Action: audit.MemberRoleAssigned, ActorUserID: &userID, OrganizationID: &orgID,
+		TargetType: audit.TargetMembership, TargetID: membershipID.String(),
+	}.WithMetadata(map[string]any{
+		"member_user_id": member.UserID.String(),
+		"role":           member.Role,
+	}))
 	httpx.WriteData(w, http.StatusOK, member)
 }

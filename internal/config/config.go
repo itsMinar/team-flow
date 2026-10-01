@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -42,6 +43,7 @@ type Config struct {
 	Worker    WorkerConfig
 	Jobs      JobsConfig
 	RateLimit RateLimitConfig
+	Metrics   MetricsConfig
 }
 
 // AppConfig holds general application settings.
@@ -120,6 +122,16 @@ type JobsConfig struct {
 	RetryBaseDelay time.Duration
 	RetryMaxDelay  time.Duration
 	EncryptionKey  string
+}
+
+// MetricsConfig controls the Prometheus endpoint.
+type MetricsConfig struct {
+	// Enabled serves metrics. It is on by default: a deployment that wants no
+	// endpoint simply does not expose the port.
+	Enabled bool
+	// Addr is the listener address for the worker's metrics endpoint. The API
+	// serves metrics on its own port.
+	Addr string
 }
 
 // RateLimitPolicyConfig is a limit per period, configured from the environment.
@@ -237,6 +249,11 @@ func Load() (*Config, error) {
 		},
 	}
 
+	// Metrics are on by default and served on the API port; the worker needs its
+	// own listener address because it has no HTTP port.
+	cfg.Metrics.Enabled = getEnvBool("METRICS_ENABLED", true)
+	cfg.Metrics.Addr = getEnv("METRICS_ADDR", ":9091")
+
 	// Rate limiting is on by default in production and off elsewhere, so a local
 	// checkout is not throttled while a deployment is protected by default.
 	cfg.RateLimit.Enabled = getEnvBool("RATE_LIMIT_ENABLED", cfg.App.Env == EnvProduction)
@@ -258,6 +275,12 @@ func (c *Config) validate() error {
 
 	if c.HTTP.Port < 1 || c.HTTP.Port > 65535 {
 		problems = append(problems, fmt.Sprintf("APP_PORT %d is out of range", c.HTTP.Port))
+	}
+
+	if strings.TrimSpace(c.Metrics.Addr) == "" {
+		problems = append(problems, "METRICS_ADDR is required when METRICS_ENABLED is set")
+	} else if _, _, err := net.SplitHostPort(c.Metrics.Addr); err != nil {
+		problems = append(problems, "METRICS_ADDR must be host:port")
 	}
 
 	if strings.TrimSpace(c.Database.URL) == "" {

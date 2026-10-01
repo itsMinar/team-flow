@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/itsMinar/team-flow/internal/api"
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/itsMinar/team-flow/internal/apikeys"
@@ -71,7 +72,7 @@ func newRateLimitedTestServer(t *testing.T, limiter *fixedLimiter) (*httptest.Se
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	secret := "http-test-secret"
 	jwt := auth.NewJWTService(secret, "teamflow", 15*time.Minute)
-	authSvc := auth.NewService(pool, jwt, 720*time.Hour, logger)
+	authSvc := auth.NewService(pool, jwt, 720*time.Hour, audit.NopRecorder(), logger)
 	orgSvc := organizations.NewService(pool, logger)
 
 	cfg := &config.Config{}
@@ -80,7 +81,7 @@ func newRateLimitedTestServer(t *testing.T, limiter *fixedLimiter) (*httptest.Se
 	cfg.Invite.TTL = 7 * 24 * time.Hour
 	cfg.APIKey.DefaultTTL, cfg.APIKey.MaxTTL = 90*24*time.Hour, 365*24*time.Hour
 
-	apiKeySvc := apikeys.NewService(pool, orgSvc, cfg.APIKey.DefaultTTL, cfg.APIKey.MaxTTL, logger)
+	apiKeySvc := apikeys.NewService(pool, orgSvc, audit.NopRecorder(), cfg.APIKey.DefaultTTL, cfg.APIKey.MaxTTL, logger)
 	authMW := auth.NewMiddleware(jwt, logger).WithAPIKeys(apiKeySvc)
 	rateLimitMW := ratelimit.NewMiddleware(limiter, logger, true)
 
@@ -90,14 +91,13 @@ func newRateLimitedTestServer(t *testing.T, limiter *fixedLimiter) (*httptest.Se
 		Health:       health.NewHandler(logger, map[string]health.Checker{}),
 		AuthHandler:  auth.NewHandler(authSvc, logger),
 		AuthMW:       authMW,
-		OrgHandler:   organizations.NewHandler(orgSvc, logger),
+		OrgHandler:   organizations.NewHandler(orgSvc, audit.NopRecorder(), logger),
 		OrgMW:        organizations.NewMiddleware(orgSvc, logger),
 		TeamsHandler: teams.NewHandler(teams.NewService(pool, orgSvc, logger), logger),
 		Projects:     projects.NewHandler(projects.NewService(pool, orgSvc), logger),
 		Tasks:        tasks.NewHandler(tasks.NewService(pool, orgSvc), logger),
 		Invitations: invitations.NewHandler(
-			invitations.NewService(pool, orgSvc, authSvc, &recordingSender{}, jobs.Enqueuer(nil),
-				cfg.Invite.TTL, cfg.Invite.BaseURL, logger), logger),
+			invitations.NewService(pool, orgSvc, authSvc, &recordingSender{}, jobs.Enqueuer(nil), audit.NopRecorder(), cfg.Invite.TTL, cfg.Invite.BaseURL, logger), logger),
 		APIKeys:   apikeys.NewHandler(apiKeySvc, logger),
 		RateLimit: rateLimitMW,
 		RateLimits: ratelimit.Policies{
@@ -116,7 +116,7 @@ func TestRateLimitingOverHTTP(t *testing.T) {
 	srv, pool, jwt := newRateLimitedTestServer(t, limiter)
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	authSvc := auth.NewService(pool, jwt, 720*time.Hour, logger)
+	authSvc := auth.NewService(pool, jwt, 720*time.Hour, audit.NopRecorder(), logger)
 
 	registered, err := authSvc.Register(ctx, auth.RegisterInput{
 		Email: "limited@example.com", Password: "StrongPassword123",

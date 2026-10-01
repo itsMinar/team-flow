@@ -6,7 +6,7 @@ This document explains what TeamFlow can do today, how its parts fit together, h
 
 TeamFlow is a Go backend for a multi-tenant team and project-management SaaS product. It is designed for multiple organizations to share one deployment and database while keeping organization data isolated.
 
-The project is currently an API foundation with eleven completed phases:
+The project is currently an API foundation with twelve completed phases:
 
 1. Foundation and infrastructure
 2. Authentication and session security
@@ -19,6 +19,7 @@ The project is currently an API foundation with eleven completed phases:
 9. API keys, one-time display, hashing, authentication, expiration, and revocation
 10. Background jobs: Redis queue, worker pool, retries, backoff, dead letters
 11. Rate limiting: Redis token buckets for authentication, users, and API keys
+12. Audit and observability: append-only audit log, metrics, trace propagation
 
 The codebase is a modular monolith. It has one repository and two executable processes:
 
@@ -29,8 +30,9 @@ The current release is useful for building and testing secure SaaS foundations. 
 and manage organization teams, projects, and tasks. Organization invitations let
 new people join an existing organization with a chosen role, API keys let
 automation call the API on behalf of one user in one organization, and
-asynchronous work runs in a separate worker process, and requests are rate
-limited per caller.
+asynchronous work runs in a separate worker process, requests are rate limited
+per caller, and security-relevant actions are written to an append-only audit log
+that operators can read.
 
 ## 2. What You Can Do Today
 
@@ -137,6 +139,22 @@ limited per caller.
 - Revoke a key immediately and hide revoked keys from listings by default.
 - Record last usage, at most once a minute per key.
 - Reject invalid, expired, and revoked keys identically.
+
+### Audit and observability
+
+- Record security-relevant events: authentication, role and membership changes,
+  invitations, and API key lifecycle.
+- Store audit rows append-only: the application role cannot update or delete them.
+- Keep audit rows when an organization is deleted, so access history cannot be
+  erased by deleting the tenant.
+- Record credential and invitation events inside the transaction that makes the
+  change, and everything else best effort so a request never fails on an audit write.
+- Expose a tenant-scoped, paginated, filterable audit read API behind `audit.read`.
+- Publish Prometheus metrics for HTTP traffic, audit writes, and job outcomes,
+  labelled by route pattern rather than by raw path.
+- Serve the same metrics endpoint from the worker, which has no API port.
+- Adopt or generate a W3C trace ID per request, echo it back, and attach it to
+  every log line.
 
 ### Rate limiting
 
@@ -290,6 +308,7 @@ All organization routes require a valid bearer access token and are under `/api/
 | `POST`   | `/organizations/{orgID}/roles`                       | `roles.manage`         | Creates a custom role.                                   |
 | `PATCH`  | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Updates a custom role and its permissions.               |
 | `DELETE` | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Deletes an unused custom role.                           |
+| `GET`    | `/organizations/{orgID}/audit-logs`                   | `audit.read`           | Reads the organization's append-only audit log.          |
 
 ### Team endpoints
 
@@ -562,6 +581,8 @@ Handlers decode requests and write responses. Services contain business rules an
 | `internal/fieldtypes`   | Shared calendar-date and partial-update field types.                              |
 | `internal/httpx`         | JSON envelopes, decoding, typed errors, and client-safe error mapping.            |
 | `internal/apikeys`       | API key creation, revocation, listing, and key authentication.                 |
+| `internal/audit`         | Append-only audit recording and the tenant-scoped audit read API.               |
+| `internal/metrics`       | Prometheus registry, HTTP metrics, and the exposition handler.                 |
 | `internal/invitations`   | Invitation creation, resend, revocation, preview, and acceptance.                |
 | `internal/jobs`          | Redis job queue, payload encryption, worker pool, retries, dead letters.          |
 | `internal/mailer`        | Transactional email sender interface and transports.                            |
@@ -592,6 +613,8 @@ internal/
   middleware/              Shared HTTP middleware
   observability/            JSON logging and request IDs
   apikeys/                  API key management and authentication
+  audit/                    Security audit recording and read API
+  metrics/                  Prometheus metrics and exposition
   fieldtypes/               Shared calendar-date and partial-update types
   invitations/              Invitation and acceptance logic
   mailer/                   Transactional email sender and transports
@@ -735,6 +758,8 @@ Configuration is loaded from environment variables at startup. Invalid configura
 | `JWT_ISSUER`                  | `teamflow`    | JWT issuer claim.                                                     |
 | `JWT_ACCESS_TTL`              | `15m`         | Access-token lifetime.                                                |
 | `JWT_REFRESH_TTL`             | `720h`        | Refresh-token lifetime and must exceed access TTL.                    |
+| `METRICS_ENABLED`             | `true`       | Serves the Prometheus endpoint; restrict it at the edge.    |
+| `METRICS_ADDR`                | `:9091`      | Worker metrics listener; the API serves `/metrics` itself.  |
 | `RATE_LIMIT_ENABLED`          | `production` | Rate limiting on; defaults to enabled in production only.  |
 | `RATE_LIMIT_FAIL_OPEN`        | `true`       | Allow requests when the limiter is unreachable.           |
 | `RATE_LIMIT_AUTH_LIMIT`       | `10`         | Unauthenticated requests per period, keyed by IP.          |
@@ -799,6 +824,7 @@ The current migrations cover:
   one-pending-invitation-per-email constraint, and RLS
 - Invitation delivery bookkeeping (`notified_at`, `delivery_attempts`) for the
   redelivery sweep
+- Append-only audit logs with `audit.read` for Owner and Admin
 - API keys with hashed storage, a composite creator-membership foreign key, and
   RLS
 
@@ -846,6 +872,33 @@ Organization creation is atomic: the organization, default roles, and Owner memb
 - Rotation is protected by a PostgreSQL row lock and transaction.
 - A revoked-token reuse attempt revokes the whole token family.
 - Logout revokes refresh sessions but does not invalidate already-issued access tokens; those remain valid until expiry.
+
+### Audit log
+
+- The audit log is append-only and separate from the activity log: activity
+  describes what happened to a resource, audit describes who authenticated, who
+  changed access, and which credentials were minted.
+- `organization_id` has no foreign key on purpose. Cascading audit rows away on
+  organization deletion would let a tenant owner erase the record of their own
+  access changes.
+- Reading requires `audit.read` and is scoped by organization in a tenant
+  transaction, so neither the permission check nor the query can be widened by a
+  crafted parameter.
+- Authentication failures are recorded without an organization, because they are
+  not tied to a tenant, and without the attempted address or password: the log must
+  not become a list of what was guessed.
+- Metadata never contains a secret. API key events record the name and prefix,
+  never the key.
+
+### Observability
+
+- Route metrics use chi route patterns rather than raw paths, so a metric cannot
+  become one series per resource ID.
+- Trace context is propagated without an exporter. Identifiers exist and are
+  correlated across logs, but nothing is sampled or shipped unless an operator
+  turns that on.
+- The audit recorder counts what it writes, so a silently degraded audit trail
+  shows up as a metric rather than as missing data.
 
 ### Rate limiting
 
@@ -1032,8 +1085,9 @@ The container API publishes port `8080`. Stop it before `make dev`, or set a dif
 
 The following capabilities are planned and should not be assumed to exist yet:
 
-- Audit and activity logging
-- Metrics and optional tracing
+- Dashboards and alert rules built on the Prometheus metrics
+- An OpenTelemetry trace exporter; identifiers propagate today, but nothing is
+  sampled or shipped
 - Further production hardening
 
 The planned roadmap is:
@@ -1049,7 +1103,7 @@ The planned roadmap is:
 9. API keys - complete
 10. Background jobs - complete
 11. Rate limiting - complete
-12. Audit and observability - planned
+12. Audit and observability - complete
 13. Testing expansion - planned
 14. Production hardening - planned
 
@@ -1063,7 +1117,8 @@ A practical order for continuing the project is:
 2. Add key rotation and per-key scopes, then comments, task watchers, and labels.
 3. Add a real email transport so the queued invitation mail leaves the process,
    and enqueue notifications and other asynchronous work on the same queue.
-4. Add audit events and metrics before exposing the API publicly.
+4. Add alerting rules, dashboards, and an OpenTelemetry exporter before exposing
+   the API publicly.
 5. Expand OpenAPI or Postman documentation as each endpoint is added.
 6. Add production deployment configuration, secret management, metrics, tracing, backups, and migration runbooks.
 

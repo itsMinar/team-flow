@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/organizations"
 	"github.com/itsMinar/team-flow/internal/teams"
@@ -45,7 +46,7 @@ func registerOrg(t *testing.T, pool *pgxpool.Pool, email, orgName string) (uuid.
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	jwt := auth.NewJWTService("integration-secret", "teamflow", 900000000000)
-	asvc := auth.NewService(pool, jwt, 720*3600000000000, logger)
+	asvc := auth.NewService(pool, jwt, 720*3600000000000, audit.NopRecorder(), logger)
 	res, err := asvc.Register(context.Background(), auth.RegisterInput{
 		Email: email, Password: "StrongPassword123", FirstName: "T", LastName: "U", OrganizationName: orgName,
 	}, auth.RequestMeta{})

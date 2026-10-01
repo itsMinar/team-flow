@@ -12,7 +12,7 @@ func TestDefaultForRole(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{APIKeysManage} {
+	for _, want := range []string{APIKeysManage, AuditRead} {
 		if !slices.Contains(DefaultForRole("Owner"), want) {
 			t.Fatalf("owner missing %q", want)
 		}
@@ -25,7 +25,7 @@ func TestDefaultForRole(t *testing.T) {
 		}
 	}
 	// Minting credentials stays with Owner and Admin.
-	for _, denied := range []string{ProjectsDelete, TasksDelete, TeamsManage, RolesManage, MembersManage, OrganizationsUpdate, APIKeysManage} {
+	for _, denied := range []string{ProjectsDelete, TasksDelete, TeamsManage, RolesManage, MembersManage, OrganizationsUpdate, APIKeysManage, AuditRead} {
 		if slices.Contains(manager, denied) {
 			t.Fatalf("manager received %q", denied)
 		}

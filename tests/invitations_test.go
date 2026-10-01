@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/db"
 	"github.com/itsMinar/team-flow/internal/httpx"
@@ -97,10 +98,10 @@ func TestInvitationsLifecycleIsolationAndRBAC(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	orgSvc := organizations.NewService(pool, logger)
 	jwt := auth.NewJWTService("integration-secret", "teamflow", 15*time.Minute)
-	authSvc := auth.NewService(pool, jwt, 720*time.Hour, logger)
+	authSvc := auth.NewService(pool, jwt, 720*time.Hour, audit.NopRecorder(), logger)
 	sender := &recordingSender{}
 	queue := &recordingQueue{}
-	svc := invitations.NewService(pool, orgSvc, authSvc, sender, queue, 7*24*time.Hour, "http://app.example.com", logger)
+	svc := invitations.NewService(pool, orgSvc, authSvc, sender, queue, audit.NopRecorder(), 7*24*time.Hour, "http://app.example.com", logger)
 	firstPage := httpx.PageRequest{Page: 1, PageSize: httpx.DefaultPageSize}
 
 	userA, orgA := registerOrg(t, pool, "inv-a@example.com", "Invitations Org A")

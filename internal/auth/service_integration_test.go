@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/httpx"
 )
@@ -51,7 +52,7 @@ func newService(t *testing.T, pool *pgxpool.Pool) *auth.Service {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	jwt := auth.NewJWTService("integration-secret", "teamflow", 15*time.Minute)
-	return auth.NewService(pool, jwt, 720*time.Hour, logger)
+	return auth.NewService(pool, jwt, 720*time.Hour, audit.NopRecorder(), logger)
 }
 
 func sampleRegister() auth.RegisterInput {

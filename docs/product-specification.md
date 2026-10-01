@@ -75,8 +75,8 @@ return typed domain errors which the HTTP layer maps to status codes.
 10. Background jobs: Redis queue, worker pool, retries, backoff, and dead-letter
     handling.
 11. Rate limiting: Redis-backed limits for authentication, users, and API keys.
-12. Audit and observability: append-only audit logs, activity logs, metrics,
-    structured logging, and optional tracing.
+12. Audit and observability: append-only audit logs, Prometheus metrics,
+    structured logging with request and trace correlation, and trace propagation.
 13. Testing: unit, integration, security, tenant-isolation, and race testing.
 14. Production hardening: security, indexes, transactions, deployment,
     configuration, and documentation review.
@@ -214,6 +214,38 @@ return typed domain errors which the HTTP layer maps to status codes.
   requests rejected before authentication consume no budget.
 - Unit, integration, HTTP, formatting, static, and race checks pass before Phase 11
   is marked complete.
+
+## Phase 12 Definition of Done
+
+- Security-relevant events are recorded with actor, organization, action,
+  outcome, target, address, user agent, request ID, trace ID, and metadata:
+  registration, login success and failure, token refresh and refresh-token
+  reuse, logout, organization create and rename, role create, update and delete,
+  member role assignment, invitation lifecycle, and API key lifecycle.
+- Audit rows are append-only: the application role can insert and read but can
+  neither update nor delete them, and the database rejects both.
+- Audit rows survive organization deletion, so an access trail cannot be erased
+  by the tenant owner, and events that belong to no tenant are never returned by
+  the tenant-scoped API.
+- Credential and invitation events are written inside the transaction that makes
+  the change; other audit writes are best effort and are never allowed to fail a
+  request.
+- Metadata never contains a secret: no password, no token, and for API keys only
+  the name and prefix.
+- The audit read API is paginated, filterable by action, outcome, actor, and time
+  range, requires `audit.read`, and is scoped by organization in a tenant
+  transaction.
+- Prometheus metrics cover HTTP request count, latency, in-flight requests, audit
+  writes, job outcomes, job latency, and queue depth, and are served by both the
+  API and the worker.
+- HTTP metrics are labelled by route pattern rather than by raw path, so the
+  label set stays bounded no matter how many resources exist.
+- Every request has a trace identifier that is adopted from a valid `traceparent`
+  when supplied, returned as `X-Trace-Id`, and attached to every log line.
+- Metrics and tracing are configurable and disabled by configuration alone, with
+  no vendor chosen and no data leaving the process by default.
+- Unit, integration, HTTP, migration, formatting, static, and race checks pass
+  before Phase 12 is marked complete.
 
 ## Definition of Done for the Product
 

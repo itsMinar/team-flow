@@ -1,5 +1,5 @@
-// Package observability provides structured logging and (in later phases)
-// metrics and tracing primitives shared across the API and worker processes.
+// Package observability provides the structured logging, request correlation, and
+// trace propagation primitives shared across the API and worker processes.
 package observability
 
 import (
@@ -14,6 +14,7 @@ type contextKey int
 
 const (
 	requestIDKey contextKey = iota
+	traceIDKey
 )
 
 // NewLogger builds a structured JSON logger writing to stdout at the given
@@ -51,11 +52,34 @@ func RequestIDFromContext(ctx context.Context) (string, bool) {
 	return id, ok
 }
 
-// LoggerWithRequestID returns a logger annotated with the request ID from ctx,
-// enabling request-scoped correlation across log lines.
+// LoggerWithRequestID returns a logger annotated with the request and trace IDs
+// from ctx, enabling correlation across log lines. It is the helper every call
+// site should use.
 func LoggerWithRequestID(ctx context.Context, base *slog.Logger) *slog.Logger {
+	return LoggerWithRequest(ctx, base)
+}
+
+// TraceIDFromContext returns the trace ID stored in ctx, if any.
+func TraceIDFromContext(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(traceIDKey).(string)
+	return id, ok
+}
+
+// ContextWithTraceID returns a copy of ctx carrying a trace ID.
+func ContextWithTraceID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, traceIDKey, id)
+}
+
+// LoggerWithRequest returns a logger annotated with the request and trace IDs from
+// ctx, so one log line can be correlated with a request and with a distributed
+// trace without the caller threading identifiers by hand.
+func LoggerWithRequest(ctx context.Context, base *slog.Logger) *slog.Logger {
+	logger := base
 	if id, ok := RequestIDFromContext(ctx); ok {
-		return base.With(slog.String("request_id", id))
+		logger = logger.With(slog.String("request_id", id))
 	}
-	return base
+	if id, ok := TraceIDFromContext(ctx); ok && id != "" {
+		logger = logger.With(slog.String("trace_id", id))
+	}
+	return logger
 }

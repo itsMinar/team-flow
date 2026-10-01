@@ -16,25 +16,41 @@ import (
 
 	"github.com/itsMinar/team-flow/internal/api"
 	"github.com/itsMinar/team-flow/internal/apikeys"
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/health"
 	"github.com/itsMinar/team-flow/internal/invitations"
+	"github.com/itsMinar/team-flow/internal/metrics"
 	"github.com/itsMinar/team-flow/internal/organizations"
 	"github.com/itsMinar/team-flow/internal/projects"
 	"github.com/itsMinar/team-flow/internal/tasks"
 	"github.com/itsMinar/team-flow/internal/teams"
 )
 
+// appServerOptions lets a test replace the pieces it cares about, such as the audit
+// recorder or the metrics registry, without duplicating the whole router wiring.
+type appServerOptions struct {
+	auditRecorder audit.Recorder
+	metrics       *metrics.Metrics
+	auditHandler  *audit.Handler
+	orgHandler    *organizations.Handler
+	apiKeyService *apikeys.Service
+}
+
+// appServerHook is called after the shared wiring is built so a test can override
+// or extend it.
+type appServerHook func(deps *api.Dependencies, opts *appServerOptions, pool *pgxpool.Pool, secret string)
+
 // newAppTestServer wires the real router against the test database, exactly as
-// cmd/api does, so the public invitation flow is exercised end to end.
-func newAppTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, *recordingSender, string) {
+// cmd/api does, so the HTTP surface is exercised end to end.
+func newAppTestServer(t *testing.T, hooks ...appServerHook) (*httptest.Server, *pgxpool.Pool, *recordingSender, string) {
 	t.Helper()
 	pool := testPool(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	jwt := auth.NewJWTService("http-test-secret", "teamflow", 15*time.Minute)
 	orgSvc := organizations.NewService(pool, logger)
-	authSvc := auth.NewService(pool, jwt, 720*time.Hour, logger)
+	authSvc := auth.NewService(pool, jwt, 720*time.Hour, audit.NopRecorder(), logger)
 	sender := &recordingSender{}
 
 	cfg := &config.Config{}
@@ -44,25 +60,46 @@ func newAppTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, *recording
 	cfg.APIKey.DefaultTTL = 90 * 24 * time.Hour
 	cfg.APIKey.MaxTTL = 365 * 24 * time.Hour
 
-	apiKeySvc := apikeys.NewService(pool, orgSvc, cfg.APIKey.DefaultTTL, cfg.APIKey.MaxTTL, logger)
+	opts := &appServerOptions{auditRecorder: audit.NopRecorder()}
+	apiKeySvc := apikeys.NewService(pool, orgSvc, opts.auditRecorder, cfg.APIKey.DefaultTTL, cfg.APIKey.MaxTTL, logger)
+	opts.apiKeyService = apiKeySvc
 	authMW := auth.NewMiddleware(jwt, logger).WithAPIKeys(apiKeySvc)
 
-	router := api.NewRouter(api.Dependencies{
+	deps := api.Dependencies{
 		Config:       cfg,
 		Logger:       logger,
 		Health:       health.NewHandler(logger, map[string]health.Checker{}),
 		AuthHandler:  auth.NewHandler(authSvc, logger),
 		AuthMW:       authMW,
-		OrgHandler:   organizations.NewHandler(orgSvc, logger),
+		OrgHandler:   organizations.NewHandler(orgSvc, opts.auditRecorder, logger),
 		OrgMW:        organizations.NewMiddleware(orgSvc, logger),
 		TeamsHandler: teams.NewHandler(teams.NewService(pool, orgSvc, logger), logger),
 		Projects:     projects.NewHandler(projects.NewService(pool, orgSvc), logger),
 		Tasks:        tasks.NewHandler(tasks.NewService(pool, orgSvc), logger),
 		Invitations: invitations.NewHandler(
-			invitations.NewService(pool, orgSvc, authSvc, sender, nil, cfg.Invite.TTL, cfg.Invite.BaseURL, logger),
+			invitations.NewService(pool, orgSvc, authSvc, sender, nil, opts.auditRecorder,
+				cfg.Invite.TTL, cfg.Invite.BaseURL, logger),
 			logger),
 		APIKeys: apikeys.NewHandler(apiKeySvc, logger),
-	})
+		Metrics: opts.metrics,
+	}
+	for _, hook := range hooks {
+		hook(&deps, opts, pool, "http-test-secret")
+	}
+	if opts.orgHandler != nil {
+		deps.OrgHandler = opts.orgHandler
+	}
+	if opts.auditHandler != nil {
+		deps.AuditHandler = opts.auditHandler
+	}
+	if opts.apiKeyService != nil {
+		deps.APIKeys = apikeys.NewHandler(opts.apiKeyService, logger)
+	}
+	if opts.metrics != nil {
+		deps.Metrics = opts.metrics
+	}
+
+	router := api.NewRouter(deps)
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 	return srv, pool, sender, "http-test-secret"
@@ -166,7 +203,7 @@ func TestInvitationRoutesOverHTTP(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	jwt := auth.NewJWTService("http-test-secret", "teamflow", 15*time.Minute)
-	authSvc := auth.NewService(pool, jwt, 720*time.Hour, logger)
+	authSvc := auth.NewService(pool, jwt, 720*time.Hour, audit.NopRecorder(), logger)
 
 	registered, err := authSvc.Register(ctx, auth.RegisterInput{
 		Email: "http-invite@example.com", Password: "StrongPassword123",

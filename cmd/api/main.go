@@ -16,14 +16,17 @@ import (
 
 	"github.com/itsMinar/team-flow/internal/api"
 	"github.com/itsMinar/team-flow/internal/apikeys"
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/cache"
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/database"
+	gendb "github.com/itsMinar/team-flow/internal/db"
 	"github.com/itsMinar/team-flow/internal/health"
 	"github.com/itsMinar/team-flow/internal/invitations"
 	"github.com/itsMinar/team-flow/internal/jobs"
 	"github.com/itsMinar/team-flow/internal/mailer"
+	"github.com/itsMinar/team-flow/internal/metrics"
 	"github.com/itsMinar/team-flow/internal/observability"
 	"github.com/itsMinar/team-flow/internal/organizations"
 	"github.com/itsMinar/team-flow/internal/projects"
@@ -93,13 +96,21 @@ func run() error {
 		"redis":    redisClient,
 	})
 
+	// Observability: the metrics registry is shared by the HTTP metrics and the
+	// audit counter, so audit writes are visible as counters as well as rows.
+	appMetrics := metrics.New()
+	auditRecorder := audit.NewSQLRecorder(gendb.New(db.Pool), appMetrics, logger)
+	if !cfg.Metrics.Enabled {
+		logger.Info("metrics disabled")
+	}
+
 	// Authentication wiring: JWT signer, service, HTTP handler, and middleware.
 	jwtService := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Issuer, cfg.JWT.AccessTTL)
-	authService := auth.NewService(db.Pool, jwtService, cfg.JWT.RefreshTTL, logger)
+	authService := auth.NewService(db.Pool, jwtService, cfg.JWT.RefreshTTL, auditRecorder, logger)
 	authHandler := auth.NewHandler(authService, logger)
 
 	orgService := organizations.NewService(db.Pool, logger)
-	orgHandler := organizations.NewHandler(orgService, logger)
+	orgHandler := organizations.NewHandler(orgService, auditRecorder, logger)
 	orgMW := organizations.NewMiddleware(orgService, logger)
 	teamService := teams.NewService(db.Pool, orgService, logger)
 	teamHandler := teams.NewHandler(teamService, logger)
@@ -126,11 +137,13 @@ func run() error {
 		return fmt.Errorf("build job queue: %w", err)
 	}
 	invitationService := invitations.NewService(db.Pool, orgService, authService,
-		mailSender, jobQueue, cfg.Invite.TTL, cfg.Invite.BaseURL, logger)
+		mailSender, jobQueue, auditRecorder, cfg.Invite.TTL, cfg.Invite.BaseURL, logger)
 	invitationHandler := invitations.NewHandler(invitationService, logger)
 
-	apiKeyService := apikeys.NewService(db.Pool, orgService, cfg.APIKey.DefaultTTL, cfg.APIKey.MaxTTL, logger)
+	apiKeyService := apikeys.NewService(db.Pool, orgService, auditRecorder,
+		cfg.APIKey.DefaultTTL, cfg.APIKey.MaxTTL, logger)
 	apiKeyHandler := apikeys.NewHandler(apiKeyService, logger)
+	auditHandler := audit.NewHandler(audit.NewService(db.Pool, orgService), logger)
 
 	// The middleware is built last because it authenticates both bearer tokens
 	// and API keys; every handler receives it when routes are registered.
@@ -167,6 +180,8 @@ func run() error {
 		Tasks:        taskHandler,
 		Invitations:  invitationHandler,
 		APIKeys:      apiKeyHandler,
+		AuditHandler: auditHandler,
+		Metrics:      appMetrics,
 		RateLimit:    rateLimitMW,
 		RateLimits: ratelimit.Policies{
 			Auth:   rateLimitPolicy("auth", cfg.RateLimit.Auth),

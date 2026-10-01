@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/database"
 	"github.com/itsMinar/team-flow/internal/db"
@@ -41,6 +42,7 @@ type Service struct {
 	auth    *auth.Service
 	mailer  mailer.Sender
 	queue   jobs.Enqueuer
+	audit   audit.Recorder
 	logger  *slog.Logger
 	ttl     time.Duration
 	baseURL string
@@ -49,11 +51,15 @@ type Service struct {
 // NewService constructs the invitations Service. The queue is optional: without
 // one, invitation emails are delivered inline instead of through a worker.
 func NewService(pool *pgxpool.Pool, orgs *organizations.Service, authSvc *auth.Service,
-	sender mailer.Sender, queue jobs.Enqueuer, ttl time.Duration, baseURL string, logger *slog.Logger,
+	sender mailer.Sender, queue jobs.Enqueuer, recorder audit.Recorder,
+	ttl time.Duration, baseURL string, logger *slog.Logger,
 ) *Service {
+	if recorder == nil {
+		recorder = audit.NopRecorder()
+	}
 	return &Service{
 		pool: pool, q: db.New(pool), orgs: orgs, auth: authSvc, mailer: sender, queue: queue,
-		ttl: ttl, baseURL: strings.TrimRight(baseURL, "/"), logger: logger,
+		audit: recorder, ttl: ttl, baseURL: strings.TrimRight(baseURL, "/"), logger: logger,
 	}
 }
 
@@ -137,7 +143,10 @@ func (s *Service) Create(ctx context.Context, userID, orgID uuid.UUID, in Create
 			return mapWriteError(err)
 		}
 		roleName = role.Name
-		return nil
+		return s.audit.RecordTx(ctx, q, audit.Event{
+			Action: audit.InvitationCreated, ActorUserID: &userID, OrganizationID: &orgID,
+			TargetType: audit.TargetInvitation, TargetID: invitation.ID.String(),
+		}.WithMetadata(map[string]any{"email": email, "role": roleName}))
 	})
 	if err != nil {
 		return InvitationDTO{}, fmt.Errorf("create invitation: %w", err)
@@ -277,7 +286,13 @@ func (s *Service) Revoke(ctx context.Context, userID, orgID, invitationID uuid.U
 		_, err = q.RevokeInvitation(ctx, db.RevokeInvitationParams{
 			ID: invitationID, OrganizationID: orgID, RevokedAt: &now,
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		return s.audit.RecordTx(ctx, q, audit.Event{
+			Action: audit.InvitationRevoked, ActorUserID: &userID, OrganizationID: &orgID,
+			TargetType: audit.TargetInvitation, TargetID: invitationID.String(),
+		})
 	})
 }
 
@@ -404,15 +419,17 @@ func (s *Service) Accept(ctx context.Context, userID uuid.UUID, in AcceptInput, 
 	}
 
 	var (
-		org     db.Organization
-		role    db.Role
-		user    db.User
-		now     = time.Now()
-		expired bool
+		org        db.Organization
+		role       db.Role
+		user       db.User
+		invitation db.Invitation
+		now        = time.Now()
+		expired    bool
 	)
 	err = s.withOrgTx(ctx, found.OrganizationID, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		invitation, err := q.GetInvitationByTokenHashForUpdate(ctx, hashToken(token))
+		var err error
+		invitation, err = q.GetInvitationByTokenHashForUpdate(ctx, hashToken(token))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return notFound(err)
 		} else if err != nil {
@@ -470,6 +487,11 @@ func (s *Service) Accept(ctx context.Context, userID uuid.UUID, in AcceptInput, 
 	if expired {
 		return AcceptResult{}, unusable(found, now)
 	}
+
+	s.audit.Record(ctx, audit.Event{
+		Action: audit.InvitationAccepted, ActorUserID: &user.ID, OrganizationID: &org.ID,
+		TargetType: audit.TargetInvitation, TargetID: found.ID.String(),
+	}.WithMetadata(map[string]any{"email": invitation.Email, "role": role.Name}))
 
 	tokens, err := s.auth.IssueSession(ctx, user.ID, meta)
 	if err != nil {

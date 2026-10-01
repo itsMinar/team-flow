@@ -36,6 +36,22 @@ type ApiKey struct {
 	UpdatedAt      time.Time
 }
 
+type AuditLog struct {
+	ID             uuid.UUID
+	OrganizationID *uuid.UUID
+	ActorUserID    *uuid.UUID
+	Action         string
+	Outcome        string
+	TargetType     *string
+	TargetID       *string
+	IpAddress      *string
+	UserAgent      *string
+	RequestID      *string
+	TraceID        *string
+	Metadata       []byte
+	CreatedAt      time.Time
+}
+
 type Invitation struct {
 	ID               uuid.UUID
 	OrganizationID   uuid.UUID

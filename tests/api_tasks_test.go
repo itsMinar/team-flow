@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/itsMinar/team-flow/internal/api"
+	"github.com/itsMinar/team-flow/internal/audit"
 	"github.com/itsMinar/team-flow/internal/auth"
 	"github.com/itsMinar/team-flow/internal/config"
 	"github.com/itsMinar/team-flow/internal/health"
@@ -39,9 +40,9 @@ func newTaskTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		Config:       cfg,
 		Logger:       logger,
 		Health:       health.NewHandler(logger, map[string]health.Checker{}),
-		AuthHandler:  auth.NewHandler(auth.NewService(pool, jwt, 720*time.Hour, logger), logger),
+		AuthHandler:  auth.NewHandler(auth.NewService(pool, jwt, 720*time.Hour, audit.NopRecorder(), logger), logger),
 		AuthMW:       auth.NewMiddleware(jwt, logger),
-		OrgHandler:   organizations.NewHandler(orgSvc, logger),
+		OrgHandler:   organizations.NewHandler(orgSvc, audit.NopRecorder(), logger),
 		OrgMW:        organizations.NewMiddleware(orgSvc, logger),
 		TeamsHandler: teams.NewHandler(teams.NewService(pool, orgSvc, logger), logger),
 		Projects:     projects.NewHandler(projects.NewService(pool, orgSvc), logger),
@@ -114,7 +115,7 @@ func TestTaskRoutesOverHTTP(t *testing.T) {
 	// Register through the auth service so the access token is signed exactly
 	// as production tokens are, then exercise the task endpoints over HTTP.
 	jwt := auth.NewJWTService("http-test-secret", "teamflow", 15*time.Minute)
-	registered, err := auth.NewService(pool, jwt, 720*time.Hour, logger).Register(ctx, auth.RegisterInput{
+	registered, err := auth.NewService(pool, jwt, 720*time.Hour, audit.NopRecorder(), logger).Register(ctx, auth.RegisterInput{
 		Email: "http-task@example.com", Password: "StrongPassword123",
 		FirstName: "Http", LastName: "Tester", OrganizationName: "HTTP Tasks Org",
 	}, auth.RequestMeta{})
