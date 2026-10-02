@@ -177,8 +177,9 @@ func (s *Service) Login(ctx context.Context, in LoginInput, meta RequestMeta) (*
 	user, err := s.q.GetUserByEmail(ctx, in.Email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Run a dummy verify to reduce timing side-channels, then fail.
-			_ = VerifyPassword("$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidin", in.Password)
+			// Verify against a real cost-12 hash so the unknown-user path takes the
+			// same time as a real comparison, then fail.
+			_ = VerifyPassword(dummyPasswordHash, in.Password)
 			s.audit.Record(ctx, denied)
 			return nil, invalidCredentials()
 		}

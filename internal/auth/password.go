@@ -10,6 +10,17 @@ import (
 // 12 is a stronger production setting with a still-reasonable hashing time.
 const bcryptCost = 12
 
+// dummyPasswordHash is a valid bcrypt hash at the real cost, verified against on
+// the unknown-user login path so that path spends the same work as a real
+// comparison and response timing does not reveal whether an email exists.
+var dummyPasswordHash = func() string {
+	hash, err := bcrypt.GenerateFromPassword([]byte("timing-equalizer-not-a-real-password"), bcryptCost)
+	if err != nil {
+		panic(fmt.Sprintf("auth: precompute dummy password hash: %v", err))
+	}
+	return string(hash)
+}()
+
 // HashPassword returns a bcrypt hash of the plaintext password. bcrypt includes
 // a per-hash salt, so no separate salt storage is needed.
 func HashPassword(plaintext string) (string, error) {
