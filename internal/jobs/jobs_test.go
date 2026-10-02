@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -60,7 +61,12 @@ func TestPayloadsAreEncryptedAndAuthenticated(t *testing.T) {
 	}
 
 	// Tampering with the ciphertext is detected rather than silently accepted.
-	tampered := "A" + sealed[1:]
+	tamperedBytes, err := base64.RawURLEncoding.DecodeString(sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tamperedBytes[queue.aead.NonceSize()] ^= 1
+	tampered := base64.RawURLEncoding.EncodeToString(tamperedBytes)
 	if _, err := queue.open(tampered); err == nil {
 		t.Fatal("expected tampered payload to be rejected")
 	}

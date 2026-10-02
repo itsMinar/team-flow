@@ -22,6 +22,9 @@ func redisClientForTest(t *testing.T) *redis.Client {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if opts.DB != 15 {
+		t.Fatal("TEST_REDIS_URL must use Redis database 15; refusing to touch other databases")
+	}
 	opts.MaxRetries = -1
 	client := redis.NewClient(opts)
 	if err := client.Ping(context.Background()).Err(); err != nil {
@@ -212,7 +215,29 @@ func TestQueueDelaysAndPromotesJobs(t *testing.T) {
 	if stats.RetryDue != 0 || stats.StreamLength != 0 {
 		t.Fatalf("a delayed job must not be claimable: %+v", stats)
 	}
-	if _, err := queue.EnqueueIn(ctx, -time.Minute, "due", nil); err != nil {
+	if _, err := queue.EnqueueIn(ctx, time.Hour, "due", nil); err != nil {
+		t.Fatal(err)
+	}
+	delayed, err := queue.rdb.ZRange(ctx, retryKey, 0, -1).Result()
+	if err != nil || len(delayed) != 2 {
+		t.Fatalf("scheduled jobs = %d, error = %v; want 2", len(delayed), err)
+	}
+	var dueJob string
+	for _, member := range delayed {
+		job, err := queue.open(member)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.Type == "due" {
+			dueJob = member
+		}
+	}
+	if dueJob == "" {
+		t.Fatal("scheduled due job was not found")
+	}
+	if err := queue.rdb.ZAdd(ctx, retryKey, redis.Z{
+		Score: float64(time.Now().Add(-time.Second).UnixMilli()), Member: dueJob,
+	}).Err(); err != nil {
 		t.Fatal(err)
 	}
 	promoted, err := queue.PromoteDue(ctx, 10)

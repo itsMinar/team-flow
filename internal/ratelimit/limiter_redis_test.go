@@ -24,6 +24,9 @@ func redisLimiterForTest(t *testing.T) *RedisLimiter {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if opts.DB != 15 {
+		t.Fatal("TEST_REDIS_URL must use Redis database 15; refusing to touch other databases")
+	}
 	client := redis.NewClient(opts)
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		t.Fatalf("connect to TEST_REDIS_URL: %v", err)

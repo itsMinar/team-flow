@@ -7,7 +7,7 @@ infrastructure while their data stays strictly isolated.
 This repository is being built incrementally, phase by phase. **Phases 1
 (Foundation), 2 (Authentication), 3 (Multi-tenancy), 4 (RBAC), 5 (Teams), 6
 (Projects), 7 (Tasks), 8 (Invitations), 9 (API keys), 10 (Background jobs), and
-11 (Rate limiting), and 12 (Audit and observability) are complete.** See
+11 (Rate limiting), 12 (Audit and observability), and 13 (Testing) are complete.** See
 [Roadmap](#roadmap) for what is done and what comes next.
 
 ## Overview
@@ -147,11 +147,16 @@ database, never an application database.** Apply all migrations first:
 docker compose exec postgres createdb -U teamflow teamflow_test
 export TEST_DATABASE_URL='postgres://teamflow:teamflow@localhost:5433/teamflow_test?sslmode=disable'
 make migrate-up DATABASE_URL="$TEST_DATABASE_URL"
-go test -race -count=1 ./...
-unset TEST_DATABASE_URL
+export TEST_REDIS_URL='redis://localhost:6379/15'
+make test-integration
+make test-race
+unset TEST_DATABASE_URL TEST_REDIS_URL
 ```
 
-Queue and rate limiter tests need a Redis instance and are skipped without it:
+`make test-integration` requires both test URLs and runs packages serially.
+PostgreSQL integration tests refuse database names that do not end in `_test`;
+Redis queue and rate limiter tests only touch database 15. They can also be run
+separately when a disposable Redis instance is available:
 
 ```bash
 export TEST_REDIS_URL='redis://localhost:6379/15'
@@ -159,10 +164,10 @@ go test -race -count=1 ./internal/jobs ./internal/ratelimit
 unset TEST_REDIS_URL
 ```
 
-They use database 15 by convention so a development Redis is not disturbed, and
-they delete only the `teamflow:jobs:*` and `teamflow:ratelimit:*` keys.
+Redis tests delete only the `teamflow:jobs:*` and `teamflow:ratelimit:*` keys.
 
-Do not run separate test processes against the same test database concurrently.
+Do not run separate test processes against the same test database concurrently;
+the Makefile targets serialize package execution for this reason.
 The suite covers token rotation and reuse, concurrent refresh attempts, logout,
 logout-all, JWT expiration requirements, HTTP authentication/validation, and
 cross-tenant isolation (reads, member listing, and updates across organizations
@@ -268,7 +273,7 @@ Bearer access token:
 | POST   | `/organizations/{orgID}/roles`                       | `roles.manage`         | Create a custom role                                     |
 | PATCH  | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Update a custom role and permissions                     |
 | DELETE | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Delete an unused custom role                             |
-| GET    | `/organizations/{orgID}/audit-logs`                   | `audit.read`           | Read the organization's append-only audit log           |
+| GET    | `/organizations/{orgID}/audit-logs`                  | `audit.read`           | Read the organization's append-only audit log            |
 
 Teams are organization-scoped and use the `teams.read` and `teams.manage`
 permissions:
@@ -305,15 +310,15 @@ Tasks belong to a project of the organization and support assignment to active
 organization members. They use the `tasks.read`, `tasks.create`,
 `tasks.update`, and `tasks.delete` permissions:
 
-| Method | Path                                                         | Authorization   | Purpose                                  |
-| ------ | ------------------------------------------------------------ | --------------- | ---------------------------------------- |
-| GET    | `/organizations/{orgID}/tasks`                                | `tasks.read`    | List filtered and paginated tasks        |
-| GET    | `/organizations/{orgID}/tasks/{taskID}`                       | `tasks.read`    | Read a task                              |
-| PATCH  | `/organizations/{orgID}/tasks/{taskID}`                       | `tasks.update`  | Update a task, including assignment      |
-| DELETE | `/organizations/{orgID}/tasks/{taskID}`                       | `tasks.delete`  | Delete a task                            |
-| GET    | `/organizations/{orgID}/tasks/{taskID}/activity`              | `tasks.read`    | Read task activity                       |
-| GET    | `/organizations/{orgID}/projects/{projectID}/tasks`           | `tasks.read`    | List the tasks of one project            |
-| POST   | `/organizations/{orgID}/projects/{projectID}/tasks`           | `tasks.create`  | Create a task in a project               |
+| Method | Path                                                | Authorization  | Purpose                             |
+| ------ | --------------------------------------------------- | -------------- | ----------------------------------- |
+| GET    | `/organizations/{orgID}/tasks`                      | `tasks.read`   | List filtered and paginated tasks   |
+| GET    | `/organizations/{orgID}/tasks/{taskID}`             | `tasks.read`   | Read a task                         |
+| PATCH  | `/organizations/{orgID}/tasks/{taskID}`             | `tasks.update` | Update a task, including assignment |
+| DELETE | `/organizations/{orgID}/tasks/{taskID}`             | `tasks.delete` | Delete a task                       |
+| GET    | `/organizations/{orgID}/tasks/{taskID}/activity`    | `tasks.read`   | Read task activity                  |
+| GET    | `/organizations/{orgID}/projects/{projectID}/tasks` | `tasks.read`   | List the tasks of one project       |
+| POST   | `/organizations/{orgID}/projects/{projectID}/tasks` | `tasks.create` | Create a task in a project          |
 
 Task list query parameters are `page`, `page_size` (maximum 100), `project_id`,
 `status`, `priority`, `assignee_id`, `unassigned`, `sort`, and `order`. Valid
@@ -327,19 +332,19 @@ tasks.
 Invitations let someone outside an organization join it with a role the
 inviter chooses. They are managed with the `members.manage` permission:
 
-| Method | Path                                                          | Authorization  | Purpose                             |
-| ------ | ------------------------------------------------------------- | -------------- | ----------------------------------- |
-| GET    | `/organizations/{orgID}/invitations`                          | `members.manage` | List invitations                    |
-| POST   | `/organizations/{orgID}/invitations`                          | `members.manage` | Invite an email address             |
-| POST   | `/organizations/{orgID}/invitations/{invitationID}/resend`    | `members.manage` | Issue a new link for a pending invite |
-| POST   | `/organizations/{orgID}/invitations/{invitationID}/revoke`    | `members.manage` | Revoke a pending invitation         |
+| Method | Path                                                       | Authorization    | Purpose                               |
+| ------ | ---------------------------------------------------------- | ---------------- | ------------------------------------- |
+| GET    | `/organizations/{orgID}/invitations`                       | `members.manage` | List invitations                      |
+| POST   | `/organizations/{orgID}/invitations`                       | `members.manage` | Invite an email address               |
+| POST   | `/organizations/{orgID}/invitations/{invitationID}/resend` | `members.manage` | Issue a new link for a pending invite |
+| POST   | `/organizations/{orgID}/invitations/{invitationID}/revoke` | `members.manage` | Revoke a pending invitation           |
 
 The accept flow is public because the invitation token is itself the credential:
 
-| Method | Path                        | Authentication                | Purpose                                     |
-| ------ | --------------------------- | ----------------------------- | ------------------------------------------- |
-| GET    | `/invitations/{token}`      | Public                        | Preview the organization, role, and expiry  |
-| POST   | `/invitations/accept`       | Optional (Bearer if present) | Create the account or join with a session    |
+| Method | Path                   | Authentication               | Purpose                                    |
+| ------ | ---------------------- | ---------------------------- | ------------------------------------------ |
+| GET    | `/invitations/{token}` | Public                       | Preview the organization, role, and expiry |
+| POST   | `/invitations/accept`  | Optional (Bearer if present) | Create the account or join with a session  |
 
 Invitation list query parameters are `page`, `page_size` (maximum 100),
 `status`, `email`, `sort`, and `order`. Supported sorts are `created_at`,
@@ -368,11 +373,11 @@ API keys are a second credential for server-to-server and automation calls. They
 are managed with the new `api_keys.manage` permission, which is granted to Owner
 and Admin only:
 
-| Method | Path                                                | Authorization      | Purpose                       |
-| ------ | --------------------------------------------------- | ------------------ | ----------------------------- |
-| GET    | `/organizations/{orgID}/api-keys`                   | `api_keys.manage`  | List API keys                 |
-| POST   | `/organizations/{orgID}/api-keys`                   | `api_keys.manage`  | Create an API key             |
-| DELETE | `/organizations/{orgID}/api-keys/{apiKeyID}`        | `api_keys.manage`  | Revoke an API key             |
+| Method | Path                                         | Authorization     | Purpose           |
+| ------ | -------------------------------------------- | ----------------- | ----------------- |
+| GET    | `/organizations/{orgID}/api-keys`            | `api_keys.manage` | List API keys     |
+| POST   | `/organizations/{orgID}/api-keys`            | `api_keys.manage` | Create an API key |
+| DELETE | `/organizations/{orgID}/api-keys/{apiKeyID}` | `api_keys.manage` | Revoke an API key |
 
 An API key authenticates a request with the `X-API-Key` header instead of a
 bearer token:
@@ -458,15 +463,15 @@ revoke and accept, and API key create and revoke.
 serves the same endpoint on `METRICS_ADDR` (default `:9091`) because it has no
 API port. Exported series:
 
-| Metric                                   | Labels                    | Meaning                                  |
-| ---------------------------------------- | ------------------------- | ---------------------------------------- |
-| `teamflow_http_requests_total`           | method, route, status     | Request count by route pattern           |
-| `teamflow_http_request_duration_seconds` | method, route             | Latency histogram                        |
-| `teamflow_http_requests_in_flight`       | —                         | Requests being served                    |
-| `teamflow_audit_events_total`            | action, outcome           | Audit events recorded                    |
-| `teamflow_jobs_processed_total`          | type, result              | Job outcomes, including dead-lettered    |
-| `teamflow_jobs_duration_seconds`         | type                      | Job execution time                       |
-| `teamflow_jobs_queue_depth`              | queue                     | Ready, retrying, and dead-lettered depth |
+| Metric                                   | Labels                | Meaning                                  |
+| ---------------------------------------- | --------------------- | ---------------------------------------- |
+| `teamflow_http_requests_total`           | method, route, status | Request count by route pattern           |
+| `teamflow_http_request_duration_seconds` | method, route         | Latency histogram                        |
+| `teamflow_http_requests_in_flight`       | —                     | Requests being served                    |
+| `teamflow_audit_events_total`            | action, outcome       | Audit events recorded                    |
+| `teamflow_jobs_processed_total`          | type, result          | Job outcomes, including dead-lettered    |
+| `teamflow_jobs_duration_seconds`         | type                  | Job execution time                       |
+| `teamflow_jobs_queue_depth`              | queue                 | Ready, retrying, and dead-lettered depth |
 
 Route labels are chi route patterns, never raw paths, so a metric cannot explode
 into one series per resource ID. Go runtime and process metrics are included.
@@ -484,11 +489,11 @@ Rate limits are token buckets evaluated atomically inside Redis with a Lua
 script, so a burst of concurrent requests cannot overspend a budget. Each surface
 gets its own bucket so one caller cannot starve another:
 
-| Surface                                   | Keyed by  | Default limit |
-| ----------------------------------------- | --------- | ------------- |
-| `/api/v1/auth/*` and `/api/v1/invitations/{token}`, `/api/v1/invitations/accept` | client IP | 10 per minute |
-| Organization-scoped routes, bearer session | user      | 300 per minute |
-| Organization-scoped routes, API key        | API key   | 600 per minute |
+| Surface                                                                          | Keyed by  | Default limit  |
+| -------------------------------------------------------------------------------- | --------- | -------------- |
+| `/api/v1/auth/*` and `/api/v1/invitations/{token}`, `/api/v1/invitations/accept` | client IP | 10 per minute  |
+| Organization-scoped routes, bearer session                                       | user      | 300 per minute |
+| Organization-scoped routes, API key                                              | API key   | 600 per minute |
 
 - **Enabled by default in production**, off elsewhere, so a local checkout is not
   throttled while a deployment is protected without configuration.
@@ -531,11 +536,11 @@ pending-entries list that identifies work abandoned by a crashed worker.
 
 Job types:
 
-| Job type                  | Runs on | Purpose                                                        |
-| ------------------------- | ------- | -------------------------------------------------------------- |
-| `invitation.email`        | API     | Delivers one invitation email; records `notified_at` on success |
-| `invitations.redeliver`   | Worker  | Re-queues invitations never handed to the queue, rotating a token |
-| `api_keys.expire_sweep`   | Worker  | Revokes API keys that expired more than 30 days ago            |
+| Job type                | Runs on | Purpose                                                           |
+| ----------------------- | ------- | ----------------------------------------------------------------- |
+| `invitation.email`      | API     | Delivers one invitation email; records `notified_at` on success   |
+| `invitations.redeliver` | Worker  | Re-queues invitations never handed to the queue, rotating a token |
+| `api_keys.expire_sweep` | Worker  | Revokes API keys that expired more than 30 days ago               |
 
 `invitations.redeliver` and `api_keys.expire_sweep` re-schedule themselves after
 each run. If the queue is unreachable when an invitation is created, the API
@@ -572,7 +577,7 @@ redis-cli XLEN  teamflow:jobs:dead     # dead-lettered jobs
       API keys
 - [x] Phase 12 — Audit and observability: append-only audit log, Prometheus
       metrics, and trace propagation
-- [ ] Phase 13 — Testing
+- [x] Phase 13 — Testing: unit, integration, security, tenant-isolation, and race checks
 - [ ] Phase 14 — Production hardening
 
 Architecture decisions are recorded in [`docs/decisions.md`](docs/decisions.md).

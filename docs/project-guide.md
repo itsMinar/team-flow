@@ -6,7 +6,7 @@ This document explains what TeamFlow can do today, how its parts fit together, h
 
 TeamFlow is a Go backend for a multi-tenant team and project-management SaaS product. It is designed for multiple organizations to share one deployment and database while keeping organization data isolated.
 
-The project is currently an API foundation with twelve completed phases:
+The project is currently an API foundation with thirteen completed phases:
 
 1. Foundation and infrastructure
 2. Authentication and session security
@@ -20,6 +20,7 @@ The project is currently an API foundation with twelve completed phases:
 10. Background jobs: Redis queue, worker pool, retries, backoff, dead letters
 11. Rate limiting: Redis token buckets for authentication, users, and API keys
 12. Audit and observability: append-only audit log, metrics, trace propagation
+13. Testing: unit, integration, security, tenant-isolation, and race testing
 
 The codebase is a modular monolith. It has one repository and two executable processes:
 
@@ -308,7 +309,7 @@ All organization routes require a valid bearer access token and are under `/api/
 | `POST`   | `/organizations/{orgID}/roles`                       | `roles.manage`         | Creates a custom role.                                   |
 | `PATCH`  | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Updates a custom role and its permissions.               |
 | `DELETE` | `/organizations/{orgID}/roles/{roleID}`              | `roles.manage`         | Deletes an unused custom role.                           |
-| `GET`    | `/organizations/{orgID}/audit-logs`                   | `audit.read`           | Reads the organization's append-only audit log.          |
+| `GET`    | `/organizations/{orgID}/audit-logs`                  | `audit.read`           | Reads the organization's append-only audit log.          |
 
 ### Team endpoints
 
@@ -343,15 +344,15 @@ Project list query parameters are `page`, `page_size` (maximum 100), `status`,
 
 ### Task endpoints
 
-| Method   | Path                                                         | Authorization  | Description                                    |
-| -------- | ------------------------------------------------------------ | -------------- | ---------------------------------------------- |
-| `GET`    | `/organizations/{orgID}/tasks`                                | `tasks.read`   | Lists tasks in the organization.               |
-| `GET`    | `/organizations/{orgID}/tasks/{taskID}`                       | `tasks.read`   | Reads a task.                                  |
-| `PATCH`  | `/organizations/{orgID}/tasks/{taskID}`                       | `tasks.update` | Updates a task, including assignment.          |
-| `DELETE` | `/organizations/{orgID}/tasks/{taskID}`                       | `tasks.delete` | Deletes a task.                                |
-| `GET`    | `/organizations/{orgID}/tasks/{taskID}/activity`              | `tasks.read`   | Lists task activity.                           |
-| `GET`    | `/organizations/{orgID}/projects/{projectID}/tasks`           | `tasks.read`   | Lists the tasks of one project.                |
-| `POST`   | `/organizations/{orgID}/projects/{projectID}/tasks`           | `tasks.create` | Creates a task in a project.                   |
+| Method   | Path                                                | Authorization  | Description                           |
+| -------- | --------------------------------------------------- | -------------- | ------------------------------------- |
+| `GET`    | `/organizations/{orgID}/tasks`                      | `tasks.read`   | Lists tasks in the organization.      |
+| `GET`    | `/organizations/{orgID}/tasks/{taskID}`             | `tasks.read`   | Reads a task.                         |
+| `PATCH`  | `/organizations/{orgID}/tasks/{taskID}`             | `tasks.update` | Updates a task, including assignment. |
+| `DELETE` | `/organizations/{orgID}/tasks/{taskID}`             | `tasks.delete` | Deletes a task.                       |
+| `GET`    | `/organizations/{orgID}/tasks/{taskID}/activity`    | `tasks.read`   | Lists task activity.                  |
+| `GET`    | `/organizations/{orgID}/projects/{projectID}/tasks` | `tasks.read`   | Lists the tasks of one project.       |
+| `POST`   | `/organizations/{orgID}/projects/{projectID}/tasks` | `tasks.create` | Creates a task in a project.          |
 
 Task list query parameters are `page`, `page_size` (maximum 100), `project_id`,
 `status`, `priority`, `assignee_id`, `unassigned`, `sort`, and `order`. Valid
@@ -393,19 +394,19 @@ curl -sS "http://localhost:8080/api/v1/organizations/$ORG_ID/tasks?assignee_id=$
 All invitation management routes require a valid bearer access token and the
 `members.manage` permission.
 
-| Method   | Path                                                        | Description                                     |
-| -------- | ----------------------------------------------------------- | ----------------------------------------------- |
-| `GET`    | `/organizations/{orgID}/invitations`                         | Lists invitations with filters and pagination.  |
-| `POST`   | `/organizations/{orgID}/invitations`                         | Invites an email address with a role.          |
-| `POST`   | `/organizations/{orgID}/invitations/{invitationID}/resend`   | Issues a new link for a pending invitation.    |
-| `POST`   | `/organizations/{orgID}/invitations/{invitationID}/revoke`   | Revokes a pending invitation.                  |
+| Method | Path                                                       | Description                                    |
+| ------ | ---------------------------------------------------------- | ---------------------------------------------- |
+| `GET`  | `/organizations/{orgID}/invitations`                       | Lists invitations with filters and pagination. |
+| `POST` | `/organizations/{orgID}/invitations`                       | Invites an email address with a role.          |
+| `POST` | `/organizations/{orgID}/invitations/{invitationID}/resend` | Issues a new link for a pending invitation.    |
+| `POST` | `/organizations/{orgID}/invitations/{invitationID}/revoke` | Revokes a pending invitation.                  |
 
 The accept flow is public because the token is the credential.
 
-| Method   | Path                   | Authentication                        | Description                                  |
-| -------- | ---------------------- | ------------------------------------- | -------------------------------------------- |
-| `GET`    | `/invitations/{token}` | Public                                | Previews the organization, role, and expiry. |
-| `POST`   | `/invitations/accept`  | Optional: bearer token if present     | Accepts the invitation and returns a session. |
+| Method | Path                   | Authentication                    | Description                                   |
+| ------ | ---------------------- | --------------------------------- | --------------------------------------------- |
+| `GET`  | `/invitations/{token}` | Public                            | Previews the organization, role, and expiry.  |
+| `POST` | `/invitations/accept`  | Optional: bearer token if present | Accepts the invitation and returns a session. |
 
 Invitation list query parameters are `page`, `page_size` (maximum 100),
 `status`, `email`, `sort`, and `order`. Supported sorts are `created_at`,
@@ -455,11 +456,11 @@ same address, `ALREADY_A_MEMBER` (409), `ACCOUNT_EXISTS` (409),
 
 ### API key endpoints
 
-| Method   | Path                                          | Authorization     | Description                                |
-| -------- | --------------------------------------------- | ----------------- | ------------------------------------------ |
-| `GET`    | `/organizations/{orgID}/api-keys`             | `api_keys.manage` | Lists keys, excluding revoked ones.        |
-| `POST`   | `/organizations/{orgID}/api-keys`             | `api_keys.manage` | Creates a key and returns it once.         |
-| `DELETE` | `/organizations/{orgID}/api-keys/{apiKeyID}`  | `api_keys.manage` | Revokes a key immediately.                 |
+| Method   | Path                                         | Authorization     | Description                         |
+| -------- | -------------------------------------------- | ----------------- | ----------------------------------- |
+| `GET`    | `/organizations/{orgID}/api-keys`            | `api_keys.manage` | Lists keys, excluding revoked ones. |
+| `POST`   | `/organizations/{orgID}/api-keys`            | `api_keys.manage` | Creates a key and returns it once.  |
+| `DELETE` | `/organizations/{orgID}/api-keys/{apiKeyID}` | `api_keys.manage` | Revokes a key immediately.          |
 
 Key list query parameters are `page`, `page_size` (maximum 100),
 `include_revoked`, `sort` (`created_at`, `expires_at`, `last_used_at`), and
@@ -578,19 +579,19 @@ Handlers decode requests and write responses. Services contain business rules an
 | `internal/database`      | PostgreSQL pool creation and database health checks.                              |
 | `internal/db`            | SQLC-generated queries, models, and database interfaces.                          |
 | `internal/health`        | Liveness and readiness handlers.                                                  |
-| `internal/fieldtypes`   | Shared calendar-date and partial-update field types.                              |
+| `internal/fieldtypes`    | Shared calendar-date and partial-update field types.                              |
 | `internal/httpx`         | JSON envelopes, decoding, typed errors, and client-safe error mapping.            |
-| `internal/apikeys`       | API key creation, revocation, listing, and key authentication.                 |
-| `internal/audit`         | Append-only audit recording and the tenant-scoped audit read API.               |
-| `internal/metrics`       | Prometheus registry, HTTP metrics, and the exposition handler.                 |
-| `internal/invitations`   | Invitation creation, resend, revocation, preview, and acceptance.                |
+| `internal/apikeys`       | API key creation, revocation, listing, and key authentication.                    |
+| `internal/audit`         | Append-only audit recording and the tenant-scoped audit read API.                 |
+| `internal/metrics`       | Prometheus registry, HTTP metrics, and the exposition handler.                    |
+| `internal/invitations`   | Invitation creation, resend, revocation, preview, and acceptance.                 |
 | `internal/jobs`          | Redis job queue, payload encryption, worker pool, retries, dead letters.          |
-| `internal/mailer`        | Transactional email sender interface and transports.                            |
+| `internal/mailer`        | Transactional email sender interface and transports.                              |
 | `internal/middleware`    | Shared HTTP middleware.                                                           |
 | `internal/observability` | Structured logging and request ID support.                                        |
 | `internal/organizations` | Organization services, handlers, routes, and tenant resolution.                   |
 | `internal/teams`         | Team services, handlers, routes, authorization, and team memberships.             |
-| `internal/tasks`         | Task services, handlers, routes, assignment, filtering, and task activity.       |
+| `internal/tasks`         | Task services, handlers, routes, assignment, filtering, and task activity.        |
 | `internal/validation`    | Reusable request validation.                                                      |
 
 ## 5. Repository Layout
@@ -738,49 +739,49 @@ make docker-down
 
 Configuration is loaded from environment variables at startup. Invalid configuration causes the process to exit before it serves traffic.
 
-| Variable                      | Default       | Purpose                                                               |
-| ----------------------------- | ------------- | --------------------------------------------------------------------- |
-| `APP_ENV`                     | `development` | Runtime environment: `development`, `test`, or `production`.          |
-| `APP_PORT`                    | `8080`        | HTTP port for the API.                                                |
-| `DATABASE_URL`                | none          | PostgreSQL connection URL. Required.                                  |
-| `DATABASE_MAX_CONNS`          | `20`          | Maximum PostgreSQL pool connections.                                  |
-| `DATABASE_MIN_CONNS`          | `2`           | Minimum PostgreSQL pool connections.                                  |
-| `DATABASE_MAX_CONN_LIFETIME`  | `1h`          | Maximum connection lifetime.                                          |
-| `DATABASE_MAX_CONN_IDLE_TIME` | `30m`         | Maximum idle connection time.                                         |
-| `REDIS_URL`                   | none          | Redis connection URL. Required.                                       |
-| `HTTP_READ_TIMEOUT`           | `15s`         | HTTP request read timeout.                                            |
-| `HTTP_WRITE_TIMEOUT`          | `15s`         | HTTP response write timeout.                                          |
-| `HTTP_IDLE_TIMEOUT`           | `60s`         | Keep-alive idle timeout.                                              |
-| `HTTP_SHUTDOWN_TIMEOUT`       | `15s`         | Graceful shutdown timeout.                                            |
-| `HTTP_MAX_BODY_BYTES`         | `1048576`     | Maximum request body size, 1 MiB by default.                          |
-| `LOG_LEVEL`                   | `info`        | `debug`, `info`, `warn`, or `error`.                                  |
-| `JWT_SECRET`                  | none          | Signing secret. Required; production requires at least 32 characters. |
-| `JWT_ISSUER`                  | `teamflow`    | JWT issuer claim.                                                     |
-| `JWT_ACCESS_TTL`              | `15m`         | Access-token lifetime.                                                |
-| `JWT_REFRESH_TTL`             | `720h`        | Refresh-token lifetime and must exceed access TTL.                    |
-| `METRICS_ENABLED`             | `true`       | Serves the Prometheus endpoint; restrict it at the edge.    |
-| `METRICS_ADDR`                | `:9091`      | Worker metrics listener; the API serves `/metrics` itself.  |
-| `RATE_LIMIT_ENABLED`          | `production` | Rate limiting on; defaults to enabled in production only.  |
-| `RATE_LIMIT_FAIL_OPEN`        | `true`       | Allow requests when the limiter is unreachable.           |
-| `RATE_LIMIT_AUTH_LIMIT`       | `10`         | Unauthenticated requests per period, keyed by IP.          |
-| `RATE_LIMIT_AUTH_PERIOD`      | `1m`         | Period for the authentication limit.                      |
-| `RATE_LIMIT_USER_LIMIT`       | `300`        | Session requests per period, keyed by user.                |
-| `RATE_LIMIT_USER_PERIOD`      | `1m`         | Period for the user limit.                                 |
-| `RATE_LIMIT_API_KEY_LIMIT`    | `600`        | API key requests per period, keyed by key.                 |
-| `RATE_LIMIT_API_KEY_PERIOD`   | `1m`         | Period for the API key limit.                              |
-| `API_KEY_DEFAULT_TTL`         | `2160h`      | API key lifetime when a request does not specify one.     |
-| `API_KEY_MAX_TTL`             | `8760h`      | Maximum API key lifetime; keys never outlive this bound.   |
-| `WORKER_CONCURRENCY`         | `4`         | Size of the background worker pool.                        |
-| `WORKER_BLOCK_TIMEOUT`        | `2s`        | How long a consumer blocks waiting for work.               |
-| `WORKER_STALE_AFTER`          | `5m`        | Idle time before another worker may reclaim a job.         |
-| `WORKER_SHUTDOWN_TIMEOUT`     | `15s`       | How long shutdown waits for the in-flight job.             |
-| `WORKER_MAX_ATTEMPTS`         | `5`         | Attempts before a job is dead-lettered.                    |
-| `WORKER_RETRY_BASE_DELAY`     | `30s`       | First retry delay; doubles per attempt.                    |
-| `WORKER_RETRY_MAX_DELAY`      | `1h`        | Upper bound on the retry delay.                            |
-| `JOB_ENCRYPTION_KEY`          | derived     | Encrypts job payloads in Redis; derived from `JWT_SECRET`. |
-| `INVITATION_BASE_URL`         | `http://localhost:3000` | Public origin of the client that renders the accept page.  |
-| `INVITATION_TTL`              | `168h`        | Invitation lifetime; must be positive and at most 720h.             |
-| `MAIL_TRANSPORT`              | `log`        | Transactional mail transport: `log` or `none`.                     |
+| Variable                      | Default                 | Purpose                                                               |
+| ----------------------------- | ----------------------- | --------------------------------------------------------------------- |
+| `APP_ENV`                     | `development`           | Runtime environment: `development`, `test`, or `production`.          |
+| `APP_PORT`                    | `8080`                  | HTTP port for the API.                                                |
+| `DATABASE_URL`                | none                    | PostgreSQL connection URL. Required.                                  |
+| `DATABASE_MAX_CONNS`          | `20`                    | Maximum PostgreSQL pool connections.                                  |
+| `DATABASE_MIN_CONNS`          | `2`                     | Minimum PostgreSQL pool connections.                                  |
+| `DATABASE_MAX_CONN_LIFETIME`  | `1h`                    | Maximum connection lifetime.                                          |
+| `DATABASE_MAX_CONN_IDLE_TIME` | `30m`                   | Maximum idle connection time.                                         |
+| `REDIS_URL`                   | none                    | Redis connection URL. Required.                                       |
+| `HTTP_READ_TIMEOUT`           | `15s`                   | HTTP request read timeout.                                            |
+| `HTTP_WRITE_TIMEOUT`          | `15s`                   | HTTP response write timeout.                                          |
+| `HTTP_IDLE_TIMEOUT`           | `60s`                   | Keep-alive idle timeout.                                              |
+| `HTTP_SHUTDOWN_TIMEOUT`       | `15s`                   | Graceful shutdown timeout.                                            |
+| `HTTP_MAX_BODY_BYTES`         | `1048576`               | Maximum request body size, 1 MiB by default.                          |
+| `LOG_LEVEL`                   | `info`                  | `debug`, `info`, `warn`, or `error`.                                  |
+| `JWT_SECRET`                  | none                    | Signing secret. Required; production requires at least 32 characters. |
+| `JWT_ISSUER`                  | `teamflow`              | JWT issuer claim.                                                     |
+| `JWT_ACCESS_TTL`              | `15m`                   | Access-token lifetime.                                                |
+| `JWT_REFRESH_TTL`             | `720h`                  | Refresh-token lifetime and must exceed access TTL.                    |
+| `METRICS_ENABLED`             | `true`                  | Serves the Prometheus endpoint; restrict it at the edge.              |
+| `METRICS_ADDR`                | `:9091`                 | Worker metrics listener; the API serves `/metrics` itself.            |
+| `RATE_LIMIT_ENABLED`          | `production`            | Rate limiting on; defaults to enabled in production only.             |
+| `RATE_LIMIT_FAIL_OPEN`        | `true`                  | Allow requests when the limiter is unreachable.                       |
+| `RATE_LIMIT_AUTH_LIMIT`       | `10`                    | Unauthenticated requests per period, keyed by IP.                     |
+| `RATE_LIMIT_AUTH_PERIOD`      | `1m`                    | Period for the authentication limit.                                  |
+| `RATE_LIMIT_USER_LIMIT`       | `300`                   | Session requests per period, keyed by user.                           |
+| `RATE_LIMIT_USER_PERIOD`      | `1m`                    | Period for the user limit.                                            |
+| `RATE_LIMIT_API_KEY_LIMIT`    | `600`                   | API key requests per period, keyed by key.                            |
+| `RATE_LIMIT_API_KEY_PERIOD`   | `1m`                    | Period for the API key limit.                                         |
+| `API_KEY_DEFAULT_TTL`         | `2160h`                 | API key lifetime when a request does not specify one.                 |
+| `API_KEY_MAX_TTL`             | `8760h`                 | Maximum API key lifetime; keys never outlive this bound.              |
+| `WORKER_CONCURRENCY`          | `4`                     | Size of the background worker pool.                                   |
+| `WORKER_BLOCK_TIMEOUT`        | `2s`                    | How long a consumer blocks waiting for work.                          |
+| `WORKER_STALE_AFTER`          | `5m`                    | Idle time before another worker may reclaim a job.                    |
+| `WORKER_SHUTDOWN_TIMEOUT`     | `15s`                   | How long shutdown waits for the in-flight job.                        |
+| `WORKER_MAX_ATTEMPTS`         | `5`                     | Attempts before a job is dead-lettered.                               |
+| `WORKER_RETRY_BASE_DELAY`     | `30s`                   | First retry delay; doubles per attempt.                               |
+| `WORKER_RETRY_MAX_DELAY`      | `1h`                    | Upper bound on the retry delay.                                       |
+| `JOB_ENCRYPTION_KEY`          | derived                 | Encrypts job payloads in Redis; derived from `JWT_SECRET`.            |
+| `INVITATION_BASE_URL`         | `http://localhost:3000` | Public origin of the client that renders the accept page.             |
+| `INVITATION_TTL`              | `168h`                  | Invitation lifetime; must be positive and at most 720h.               |
+| `MAIL_TRANSPORT`              | `log`                   | Transactional mail transport: `log` or `none`.                        |
 
 `MAIL_TRANSPORT=log` writes the invitation link to the application log so the
 accept flow can be followed without an SMTP server. It is rejected when

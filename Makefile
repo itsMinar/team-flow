@@ -34,15 +34,21 @@ build: ## Build api and worker binaries into ./bin
 
 .PHONY: test
 test: ## Run all tests
-	go test ./...
+	go test -p 1 -count=1 ./...
 
 .PHONY: test-race
 test-race: ## Run all tests with the race detector
-	go test -race ./...
+	go test -p 1 -race -count=1 ./...
+
+.PHONY: test-integration
+test-integration: ## Run integration tests (requires disposable PostgreSQL and Redis)
+	@test -n "$$TEST_DATABASE_URL" || { echo "TEST_DATABASE_URL must point to a disposable *_test database" >&2; exit 1; }
+	@test -n "$$TEST_REDIS_URL" || { echo "TEST_REDIS_URL must point to disposable Redis database 15" >&2; exit 1; }
+	go test -p 1 -count=1 ./...
 
 .PHONY: cover
 cover: ## Run tests with coverage report
-	go test -coverprofile=coverage.out ./...
+	go test -p 1 -count=1 -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
 
 .PHONY: fmt

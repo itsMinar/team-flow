@@ -247,6 +247,27 @@ return typed domain errors which the HTTP layer maps to status codes.
 - Unit, integration, HTTP, migration, formatting, static, and race checks pass
   before Phase 12 is marked complete.
 
+## Phase 13 Definition of Done
+
+- Unit tests cover validation, authorization decisions, token and credential
+  handling, queue behavior, rate-limit behavior, and HTTP error mapping.
+- Integration and HTTP tests exercise authentication, membership and RBAC,
+  invitation and API-key lifecycles, projects, tasks, audit, rate limiting, and
+  background-job delivery against the real PostgreSQL and Redis dependencies.
+- Security tests verify that credentials and sensitive payloads are not exposed,
+  invalid or replayed credentials are rejected, and tenant-scoped references
+  cannot cross organizations.
+- Tenant-isolation tests cover service and HTTP access, database constraints,
+  and RLS behavior; database-backed tests use a migrated disposable database
+  whose name ends in `_test`.
+- Redis integration tests are restricted to disposable database 15 and touch
+  only TeamFlow's job and rate-limit key prefixes.
+- Standard test targets serialize package execution so tests that truncate the
+  shared test database cannot overlap.
+- `make test`, `make test-integration`, `make test-race`, and `go vet ./...`
+  pass; integration tests are never silently treated as run when their
+  dependencies are absent.
+
 ## Definition of Done for the Product
 
 The product is complete only when the API, worker, migrations, seed data,
