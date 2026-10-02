@@ -268,6 +268,30 @@ return typed domain errors which the HTTP layer maps to status codes.
   pass; integration tests are never silently treated as run when their
   dependencies are absent.
 
+## Phase 14 Definition of Done
+
+- Production configuration rejects malformed typed overrides, the development
+  JWT example, weak or reused job-encryption secrets, non-HTTPS invitation
+  origins, PostgreSQL connections without certificate-verifying TLS, and
+  Redis connections without TLS.
+- Production API and worker startup refuse PostgreSQL roles with superuser or
+  `BYPASSRLS` privileges.
+- The local Compose stack binds published ports to loopback and runs the API and
+  worker with read-only filesystems, dropped capabilities, no-new-privileges,
+  and bounded process counts.
+- Query-backed indexes are reviewed against SQL access paths; the role-membership
+  counts/deletes and membership-triggered task unassignment have composite indexes.
+- Tenant writes and critical lifecycle changes retain their existing transactional
+  boundaries and pass integration checks as both the schema owner and the
+  non-superuser application role.
+- OpenAPI documents every current API operation, auth method, request body,
+  pagination shape, and standard response envelope.
+- The production operations guide covers secret handling, deployment controls,
+  migrations, backups/restores, health checks, metrics, and known provider-specific
+  gaps.
+- Formatting, unit, integration, race, static-analysis, migration, Compose, and
+  OpenAPI checks pass before Phase 14 is marked complete.
+
 ## Definition of Done for the Product
 
 The product is complete only when the API, worker, migrations, seed data,

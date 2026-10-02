@@ -178,6 +178,10 @@ func (c *Config) IsProduction() bool {
 // validates the result. It returns an error describing every problem found so
 // the operator can fix configuration in one pass.
 func Load() (*Config, error) {
+	if err := validateEnvOverrides(); err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		App: AppConfig{
 			Env: Environment(getEnv("APP_ENV", string(EnvDevelopment))),
@@ -276,6 +280,28 @@ func (c *Config) validate() error {
 	if c.HTTP.Port < 1 || c.HTTP.Port > 65535 {
 		problems = append(problems, fmt.Sprintf("APP_PORT %d is out of range", c.HTTP.Port))
 	}
+	for _, timeout := range []struct {
+		name  string
+		value time.Duration
+	}{
+		{"HTTP_READ_TIMEOUT", c.HTTP.ReadTimeout},
+		{"HTTP_WRITE_TIMEOUT", c.HTTP.WriteTimeout},
+		{"HTTP_IDLE_TIMEOUT", c.HTTP.IdleTimeout},
+		{"HTTP_SHUTDOWN_TIMEOUT", c.HTTP.ShutdownTimeout},
+	} {
+		if timeout.value <= 0 {
+			problems = append(problems, timeout.name+" must be positive")
+		}
+	}
+	if c.HTTP.MaxBodyBytes < 1 {
+		problems = append(problems, "HTTP_MAX_BODY_BYTES must be positive")
+	}
+	if c.Database.MaxConns < 1 {
+		problems = append(problems, "DATABASE_MAX_CONNS must be at least 1")
+	}
+	if c.Database.MinConns < 0 || c.Database.MinConns > c.Database.MaxConns {
+		problems = append(problems, "DATABASE_MIN_CONNS must be between 0 and DATABASE_MAX_CONNS")
+	}
 
 	if strings.TrimSpace(c.Metrics.Addr) == "" {
 		problems = append(problems, "METRICS_ADDR is required when METRICS_ENABLED is set")
@@ -290,6 +316,22 @@ func (c *Config) validate() error {
 	if strings.TrimSpace(c.Redis.URL) == "" {
 		problems = append(problems, "REDIS_URL is required")
 	}
+	if c.App.Env == EnvProduction {
+		if c.Database.URL != "" {
+			databaseURL, err := url.Parse(c.Database.URL)
+			if err != nil || (databaseURL.Scheme != "postgres" && databaseURL.Scheme != "postgresql") {
+				problems = append(problems, "DATABASE_URL must use the postgres scheme in production")
+			} else if mode := databaseURL.Query().Get("sslmode"); mode != "verify-ca" && mode != "verify-full" {
+				problems = append(problems, "DATABASE_URL sslmode must be verify-ca or verify-full in production")
+			}
+		}
+		if c.Redis.URL != "" {
+			redisURL, err := url.Parse(c.Redis.URL)
+			if err != nil || redisURL.Scheme != "rediss" {
+				problems = append(problems, "REDIS_URL must use rediss in production")
+			}
+		}
+	}
 
 	switch strings.ToLower(c.Log.Level) {
 	case "debug", "info", "warn", "error":
@@ -301,6 +343,8 @@ func (c *Config) validate() error {
 		problems = append(problems, "JWT_SECRET is required")
 	} else if c.App.Env == EnvProduction && len(c.JWT.Secret) < 32 {
 		problems = append(problems, "JWT_SECRET must be at least 32 characters in production")
+	} else if c.App.Env == EnvProduction && c.JWT.Secret == "dev-only-change-me-to-a-long-random-secret" {
+		problems = append(problems, "JWT_SECRET must not use the development example value in production")
 	}
 	if c.JWT.AccessTTL <= 0 {
 		problems = append(problems, "JWT_ACCESS_TTL must be positive")
@@ -317,6 +361,21 @@ func (c *Config) validate() error {
 	}
 	if err := validateAbsoluteURL("INVITATION_BASE_URL", c.Invite.BaseURL); err != nil {
 		problems = append(problems, err.Error())
+	}
+	if c.App.Env == EnvProduction && !strings.HasPrefix(strings.ToLower(c.Invite.BaseURL), "https://") {
+		problems = append(problems, "INVITATION_BASE_URL must use https in production")
+	}
+	if c.App.Env == EnvProduction {
+		switch {
+		case strings.TrimSpace(c.Jobs.EncryptionKey) == "":
+			problems = append(problems, "JOB_ENCRYPTION_KEY is required in production")
+		case len(c.Jobs.EncryptionKey) < 32:
+			problems = append(problems, "JOB_ENCRYPTION_KEY must be at least 32 characters in production")
+		case c.Jobs.EncryptionKey == "use-a-long-random-job-encryption-secret":
+			problems = append(problems, "JOB_ENCRYPTION_KEY must not use the development example value in production")
+		case c.Jobs.EncryptionKey == c.JWT.Secret:
+			problems = append(problems, "JOB_ENCRYPTION_KEY must be independent from JWT_SECRET in production")
+		}
 	}
 
 	for _, policy := range []struct {
@@ -383,6 +442,55 @@ func (c *Config) validate() error {
 
 	if len(problems) > 0 {
 		return fmt.Errorf("invalid configuration:\n  - %s", strings.Join(problems, "\n  - "))
+	}
+	return nil
+}
+
+// validateEnvOverrides rejects malformed typed values instead of silently
+// substituting defaults, which can otherwise hide production misconfiguration.
+func validateEnvOverrides() error {
+	var problems []string
+	validate := func(keys []string, parse func(string) error) {
+		for _, key := range keys {
+			value, ok := os.LookupEnv(key)
+			if !ok || value == "" {
+				continue
+			}
+			if err := parse(value); err != nil {
+				problems = append(problems, key+" is invalid")
+			}
+		}
+	}
+	validate([]string{
+		"APP_PORT", "DATABASE_MAX_CONNS", "DATABASE_MIN_CONNS",
+		"RATE_LIMIT_AUTH_LIMIT", "RATE_LIMIT_USER_LIMIT", "RATE_LIMIT_API_KEY_LIMIT",
+		"WORKER_CONCURRENCY", "WORKER_MAX_ATTEMPTS",
+	}, func(value string) error {
+		_, err := strconv.Atoi(value)
+		return err
+	})
+	validate([]string{"HTTP_MAX_BODY_BYTES"}, func(value string) error {
+		_, err := strconv.ParseInt(value, 10, 64)
+		return err
+	})
+	validate([]string{
+		"HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT",
+		"DATABASE_MAX_CONN_LIFETIME", "DATABASE_MAX_CONN_IDLE_TIME",
+		"JWT_ACCESS_TTL", "JWT_REFRESH_TTL", "API_KEY_DEFAULT_TTL", "API_KEY_MAX_TTL",
+		"WORKER_BLOCK_TIMEOUT", "WORKER_STALE_AFTER", "WORKER_SHUTDOWN_TIMEOUT",
+		"WORKER_RETRY_BASE_DELAY", "WORKER_RETRY_MAX_DELAY",
+		"RATE_LIMIT_AUTH_PERIOD", "RATE_LIMIT_USER_PERIOD", "RATE_LIMIT_API_KEY_PERIOD",
+		"INVITATION_TTL",
+	}, func(value string) error {
+		_, err := time.ParseDuration(value)
+		return err
+	})
+	validate([]string{"METRICS_ENABLED", "RATE_LIMIT_ENABLED", "RATE_LIMIT_FAIL_OPEN"}, func(value string) error {
+		_, err := strconv.ParseBool(value)
+		return err
+	})
+	if len(problems) > 0 {
+		return fmt.Errorf("invalid environment configuration:\n  - %s", strings.Join(problems, "\n  - "))
 	}
 	return nil
 }

@@ -36,8 +36,8 @@ func TestLoad_MissingRequired(t *testing.T) {
 }
 
 func TestLoad_InvalidEnvAndLevel(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://localhost/db")
-	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("DATABASE_URL", "postgres://localhost/db?sslmode=verify-full")
+	t.Setenv("REDIS_URL", "rediss://localhost:6379")
 	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("APP_ENV", "staging")
 	t.Setenv("LOG_LEVEL", "verbose")
@@ -48,8 +48,8 @@ func TestLoad_InvalidEnvAndLevel(t *testing.T) {
 }
 
 func TestLoad_ParsesOverrides(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://localhost/db")
-	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("DATABASE_URL", "postgres://localhost/db?sslmode=verify-full")
+	t.Setenv("REDIS_URL", "rediss://localhost:6379")
 	t.Setenv("JWT_SECRET", "a-sufficiently-long-production-secret-value")
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("APP_PORT", "9090")
@@ -57,6 +57,8 @@ func TestLoad_ParsesOverrides(t *testing.T) {
 	// The log mail transport writes live invitation links to the log, so it is
 	// rejected in production.
 	t.Setenv("MAIL_TRANSPORT", "none")
+	t.Setenv("JOB_ENCRYPTION_KEY", "an-independent-production-job-secret-value")
+	t.Setenv("INVITATION_BASE_URL", "https://app.example.com")
 
 	cfg, err := Load()
 	if err != nil {
@@ -74,8 +76,8 @@ func TestLoad_ParsesOverrides(t *testing.T) {
 }
 
 func TestLoad_InvitationDefaults(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://localhost/db")
-	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("DATABASE_URL", "postgres://localhost/db?sslmode=verify-full")
+	t.Setenv("REDIS_URL", "rediss://localhost:6379")
 	t.Setenv("JWT_SECRET", "a-sufficiently-long-local-secret")
 
 	cfg, err := Load()
@@ -141,10 +143,12 @@ func TestLoad_RejectsInvalidInvitationConfig(t *testing.T) {
 }
 
 func TestLoad_RejectsLogMailTransportInProduction(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://localhost/db")
-	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("DATABASE_URL", "postgres://localhost/db?sslmode=verify-full")
+	t.Setenv("REDIS_URL", "rediss://localhost:6379")
 	t.Setenv("JWT_SECRET", "a-sufficiently-long-production-secret-value")
 	t.Setenv("APP_ENV", "production")
+	t.Setenv("JOB_ENCRYPTION_KEY", "an-independent-production-job-secret-value")
+	t.Setenv("INVITATION_BASE_URL", "https://app.example.com")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("production must not run with the log mail transport")
@@ -222,11 +226,13 @@ func TestLoad_RateLimitDefaults(t *testing.T) {
 }
 
 func TestLoad_RateLimitDefaultsOnInProduction(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://localhost/db")
-	t.Setenv("REDIS_URL", "redis://localhost:6379")
+	t.Setenv("DATABASE_URL", "postgres://localhost/db?sslmode=verify-full")
+	t.Setenv("REDIS_URL", "rediss://localhost:6379")
 	t.Setenv("JWT_SECRET", "a-sufficiently-long-production-secret-value")
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("MAIL_TRANSPORT", "none")
+	t.Setenv("JOB_ENCRYPTION_KEY", "an-independent-production-job-secret-value")
+	t.Setenv("INVITATION_BASE_URL", "https://app.example.com")
 
 	cfg, err := Load()
 	if err != nil {
@@ -234,6 +240,80 @@ func TestLoad_RateLimitDefaultsOnInProduction(t *testing.T) {
 	}
 	if !cfg.RateLimit.Enabled {
 		t.Error("rate limiting must default to enabled in production")
+	}
+}
+
+func TestLoad_RejectsUnsafeProductionConfiguration(t *testing.T) {
+	cases := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "missing job key", key: "JOB_ENCRYPTION_KEY", value: ""},
+		{name: "short job key", key: "JOB_ENCRYPTION_KEY", value: "short"},
+		{name: "development job-key example", key: "JOB_ENCRYPTION_KEY", value: "use-a-long-random-job-encryption-secret"},
+		{name: "job key reused for jwt", key: "JOB_ENCRYPTION_KEY", value: "a-sufficiently-long-production-secret-value"},
+		{name: "http invitation origin", key: "INVITATION_BASE_URL", value: "http://app.example.com"},
+		{name: "development jwt example", key: "JWT_SECRET", value: "dev-only-change-me-to-a-long-random-secret"},
+		{name: "database without verified tls", key: "DATABASE_URL", value: "postgres://app:pass@db.example.com/teamflow?sslmode=disable"},
+		{name: "redis without tls", key: "REDIS_URL", value: "redis://cache.example.com:6379/0"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "postgres://app:pass@db.example.com/teamflow?sslmode=verify-full")
+			t.Setenv("REDIS_URL", "rediss://cache.example.com:6379/0")
+			t.Setenv("JWT_SECRET", "a-sufficiently-long-production-secret-value")
+			t.Setenv("JOB_ENCRYPTION_KEY", "an-independent-production-job-secret-value")
+			t.Setenv("INVITATION_BASE_URL", "https://app.example.com")
+			t.Setenv("APP_ENV", "production")
+			t.Setenv("MAIL_TRANSPORT", "none")
+			t.Setenv(test.key, test.value)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() accepted unsafe production setting %s", test.key)
+			}
+		})
+	}
+}
+
+func TestLoad_RejectsMalformedTypedEnvironmentOverrides(t *testing.T) {
+	cases := []struct{ key, value string }{
+		{"APP_PORT", "not-a-port"},
+		{"HTTP_READ_TIMEOUT", "fifteen seconds"},
+		{"RATE_LIMIT_FAIL_OPEN", "not-a-bool"},
+	}
+	for _, test := range cases {
+		t.Run(test.key, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/db")
+			t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+			t.Setenv("JWT_SECRET", "test-secret")
+			t.Setenv("APP_ENV", "development")
+			t.Setenv(test.key, test.value)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() accepted malformed %s", test.key)
+			}
+		})
+	}
+}
+
+func TestLoad_RejectsUnsafeHTTPAndPoolBounds(t *testing.T) {
+	cases := []struct{ key, value string }{
+		{"HTTP_READ_TIMEOUT", "0s"},
+		{"HTTP_WRITE_TIMEOUT", "-1s"},
+		{"HTTP_MAX_BODY_BYTES", "0"},
+		{"DATABASE_MAX_CONNS", "0"},
+		{"DATABASE_MIN_CONNS", "21"},
+	}
+	for _, test := range cases {
+		t.Run(test.key, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "postgres://user:pass@localhost/db")
+			t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+			t.Setenv("JWT_SECRET", "test-secret")
+			t.Setenv("APP_ENV", "development")
+			t.Setenv(test.key, test.value)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() accepted unsafe %s=%s", test.key, test.value)
+			}
+		})
 	}
 }
 

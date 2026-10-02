@@ -56,6 +56,30 @@ func (p *Pool) Health(ctx context.Context) error {
 	return p.Ping(ctx)
 }
 
+func validateRLSRole(superuser, bypassRLS bool) error {
+	if superuser || bypassRLS {
+		return fmt.Errorf("application database role must not be superuser or have BYPASSRLS")
+	}
+	return nil
+}
+
+// CheckRLSRole ensures the connected role cannot bypass row-level security.
+// Production processes must use a dedicated non-superuser application role.
+func (p *Pool) CheckRLSRole(ctx context.Context) error {
+	var superuser, bypassRLS bool
+	if err := p.QueryRow(ctx, `
+		SELECT rolsuper, rolbypassrls
+		FROM pg_roles
+		WHERE rolname = current_user
+	`).Scan(&superuser, &bypassRLS); err != nil {
+		return fmt.Errorf("inspect application database role: %w", err)
+	}
+	if err := validateRLSRole(superuser, bypassRLS); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Close releases all connections held by the pool.
 func (p *Pool) Close() {
 	p.Pool.Close()

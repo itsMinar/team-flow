@@ -2,6 +2,36 @@
 
 Short records of notable engineering decisions. Newest first within each phase.
 
+## Phase 14 — Production hardening
+
+### Production connections verify TLS and cannot bypass RLS
+
+Production configuration requires PostgreSQL `sslmode=verify-ca` or
+`verify-full`, a `rediss://` Redis URL, and an HTTPS invitation origin. The API
+and worker also inspect the connected PostgreSQL role and refuse superuser or
+`BYPASSRLS` privileges. These checks turn deployment guidance into startup
+failures instead of relying on an operator to notice a plaintext connection or
+an RLS-bypassing role after data is exposed.
+
+The local development stack intentionally keeps its loopback PostgreSQL and
+Redis URLs unencrypted; it is marked `APP_ENV=development` and is not a
+production deployment template.
+
+### Indexes follow observed SQL access paths
+
+`CountMembershipsByRole` filters by both `role_id` and `organization_id`, and
+PostgreSQL also needs to find referencing memberships when checking role
+deletion. Migration 19 adds `(role_id, organization_id)` for those paths. We did
+not add indexes for every sortable field: the project and task queries order by
+parameterized `CASE` expressions, so ordinary field indexes would not satisfy
+those sort expressions. Revisit them with production-like query plans rather
+than adding write overhead speculatively.
+
+Task assignee references use `(assignee_id, organization_id)`. Membership
+deletion invokes the foreign-key action that clears the assignee, but the prior
+task index began with `organization_id` and could not support that lookup.
+Migration 20 adds the matching index order.
+
 ## Phase 12 — Audit and observability
 
 ### The audit log is a separate table from the activity log, not a view over it

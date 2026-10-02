@@ -1,0 +1,1177 @@
+openapi: 3.1.0
+info:
+  title: TeamFlow API
+  version: 1.0.0
+  description: >-
+    Organization-scoped project and task management API. Successful responses
+    use a data envelope; paginated responses also include pagination metadata.
+servers:
+  - url: https://api.example.com
+    description: Production ingress (TLS required)
+  - url: http://localhost:8080
+    description: Local development
+security:
+  - bearerAuth: []
+  - apiKeyAuth: []
+tags:
+  - name: Health
+  - name: Authentication
+  - name: Organizations
+  - name: Roles and members
+  - name: Teams
+  - name: Projects
+  - name: Tasks
+  - name: Invitations
+  - name: API keys
+  - name: Audit
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      security: []
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+  /ready:
+    get:
+      tags: [Health]
+      summary: Dependency readiness probe
+      security: []
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        '503': {$ref: '#/components/responses/Error'}
+  /metrics:
+    get:
+      tags: [Health]
+      summary: Scrape Prometheus metrics
+      description: Keep this endpoint on a private monitoring network; do not expose it through the public ingress.
+      security: []
+      responses:
+        '200':
+          description: Prometheus text exposition.
+          content:
+            text/plain:
+              schema: {type: string}
+  /api/v1/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a user, organization, and session
+      security: []
+      requestBody: {$ref: '#/components/requestBodies/Register'}
+      responses:
+        '201': {$ref: '#/components/responses/Created'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate with email and password
+      security: []
+      requestBody: {$ref: '#/components/requestBodies/Login'}
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/auth/me:
+    get:
+      tags: [Authentication]
+      summary: Read the current user
+      security:
+        - bearerAuth: []
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Rotate a refresh token
+      security: []
+      requestBody: {$ref: '#/components/requestBodies/Refresh'}
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke a refresh-token family
+      security: []
+      requestBody: {$ref: '#/components/requestBodies/Refresh'}
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/auth/logout-all:
+    post:
+      tags: [Authentication]
+      summary: Revoke all refresh sessions for the current user
+      security:
+        - bearerAuth: []
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations:
+    get:
+      tags: [Organizations]
+      summary: List organizations for the current user
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: [Organizations]
+      summary: Create an organization
+      requestBody: {$ref: '#/components/requestBodies/Organization'}
+      responses:
+        '201': {$ref: '#/components/responses/Created'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+    get:
+      tags: [Organizations]
+      summary: Read an organization
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+    patch:
+      tags: [Organizations]
+      summary: Rename an organization
+      requestBody: {$ref: '#/components/requestBodies/Organization'}
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/members:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+    get:
+      tags: [Roles and members]
+      summary: List organization members
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/members/{membershipID}/role:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/MembershipID'}
+    patch:
+      tags: [Roles and members]
+      summary: Assign a role to a member
+      requestBody: {$ref: '#/components/requestBodies/AssignRole'}
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/roles:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+    get:
+      tags: [Roles and members]
+      summary: List roles and permissions
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: [Roles and members]
+      summary: Create a custom role
+      requestBody: {$ref: '#/components/requestBodies/Role'}
+      responses:
+        '201': {$ref: '#/components/responses/Created'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/roles/{roleID}:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/RoleID'}
+    patch:
+      tags: [Roles and members]
+      summary: Update a custom role
+      requestBody: {$ref: '#/components/requestBodies/Role'}
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      tags: [Roles and members]
+      summary: Delete an unused custom role
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/audit-logs:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/Page'}
+      - {$ref: '#/components/parameters/PageSize'}
+    get:
+      tags: [Audit]
+      summary: List tenant audit events
+      description: Requires the audit.read permission; time filters are limited to the preceding 90 days.
+      parameters:
+        - name: action
+          in: query
+          schema: {type: string, maxLength: 100}
+        - name: outcome
+          in: query
+          schema: {type: string, enum: [success, failure, denied]}
+        - name: actor_user_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: since
+          in: query
+          schema: {type: string, format: date-time}
+      responses:
+        '200': {$ref: '#/components/responses/Page'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/teams:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+    get:
+      tags: [Teams]
+      summary: List teams
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: [Teams]
+      summary: Create a team
+      requestBody: {$ref: '#/components/requestBodies/Team'}
+      responses:
+        '201': {$ref: '#/components/responses/Created'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/teams/{teamID}:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/TeamID'}
+    get:
+      tags: [Teams]
+      summary: Read a team
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+    patch:
+      tags: [Teams]
+      summary: Update a team
+      requestBody: {$ref: '#/components/requestBodies/Team'}
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      tags: [Teams]
+      summary: Delete a team
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/teams/{teamID}/members:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/TeamID'}
+    get:
+      tags: [Teams]
+      summary: List team members
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: [Teams]
+      summary: Add an active organization member to a team
+      requestBody: {$ref: '#/components/requestBodies/TeamMember'}
+      responses:
+        '201': {$ref: '#/components/responses/Created'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/teams/{teamID}/members/{teamMemberID}:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/TeamID'}
+      - {$ref: '#/components/parameters/TeamMemberID'}
+    delete:
+      tags: [Teams]
+      summary: Remove a team member
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/projects:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+    get:
+      tags: [Projects]
+      summary: List projects
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - name: status
+          in: query
+          schema:
+            {
+              type: string,
+              enum: [planning, active, on_hold, completed, archived],
+            }
+        - name: priority
+          in: query
+          schema: {type: string, enum: [low, medium, high, urgent]}
+        - name: team_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: sort
+          in: query
+          schema:
+            {
+              type: string,
+              enum: [created_at, updated_at, name, due_date, priority],
+              default: created_at,
+            }
+        - {$ref: '#/components/parameters/Order'}
+      responses:
+        '200': {$ref: '#/components/responses/Page'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: [Projects]
+      summary: Create a project
+      requestBody: {$ref: '#/components/requestBodies/CreateProject'}
+      responses:
+        '201': {$ref: '#/components/responses/Created'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/projects/{projectID}:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/ProjectID'}
+    get:
+      tags: [Projects]
+      summary: Read a project
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+    patch:
+      tags: [Projects]
+      summary: Update a project
+      requestBody: {$ref: '#/components/requestBodies/UpdateProject'}
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      tags: [Projects]
+      summary: Delete a project and its tasks
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/projects/{projectID}/activity:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/ProjectID'}
+      - {$ref: '#/components/parameters/Page'}
+      - {$ref: '#/components/parameters/PageSize'}
+    get:
+      tags: [Projects]
+      summary: List project activity
+      responses:
+        '200': {$ref: '#/components/responses/Page'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/tasks:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+    get:
+      tags: [Tasks]
+      summary: List organization tasks
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - name: project_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: status
+          in: query
+          schema:
+            {
+              type: string,
+              enum: [todo, in_progress, blocked, in_review, done, cancelled],
+            }
+        - name: priority
+          in: query
+          schema: {type: string, enum: [low, medium, high, urgent]}
+        - name: assignee_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: unassigned
+          in: query
+          schema: {type: boolean}
+        - name: sort
+          in: query
+          schema:
+            {
+              type: string,
+              enum: [created_at, updated_at, title, due_date, priority, status],
+              default: created_at,
+            }
+        - {$ref: '#/components/parameters/Order'}
+      responses:
+        '200': {$ref: '#/components/responses/Page'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/tasks/{taskID}:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/TaskID'}
+    get:
+      tags: [Tasks]
+      summary: Read a task
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+    patch:
+      tags: [Tasks]
+      summary: Update a task
+      requestBody: {$ref: '#/components/requestBodies/UpdateTask'}
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      tags: [Tasks]
+      summary: Delete a task
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/tasks/{taskID}/activity:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/TaskID'}
+      - {$ref: '#/components/parameters/Page'}
+      - {$ref: '#/components/parameters/PageSize'}
+    get:
+      tags: [Tasks]
+      summary: List task activity
+      responses:
+        '200': {$ref: '#/components/responses/Page'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/projects/{projectID}/tasks:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/ProjectID'}
+    get:
+      tags: [Tasks]
+      summary: List tasks in a project
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - name: status
+          in: query
+          schema:
+            {
+              type: string,
+              enum: [todo, in_progress, blocked, in_review, done, cancelled],
+            }
+        - name: priority
+          in: query
+          schema: {type: string, enum: [low, medium, high, urgent]}
+        - name: assignee_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: unassigned
+          in: query
+          schema: {type: boolean}
+        - name: sort
+          in: query
+          schema:
+            {
+              type: string,
+              enum: [created_at, updated_at, title, due_date, priority, status],
+              default: created_at,
+            }
+        - {$ref: '#/components/parameters/Order'}
+      responses:
+        '200': {$ref: '#/components/responses/Page'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: [Tasks]
+      summary: Create a task in a project
+      requestBody: {$ref: '#/components/requestBodies/CreateTask'}
+      responses:
+        '201': {$ref: '#/components/responses/Created'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/invitations:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+    get:
+      tags: [Invitations]
+      summary: List invitations
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - name: status
+          in: query
+          schema: {type: string, enum: [pending, accepted, revoked, expired]}
+        - name: email
+          in: query
+          schema: {type: string, format: email}
+        - name: sort
+          in: query
+          schema:
+            {
+              type: string,
+              enum: [created_at, expires_at, email],
+              default: created_at,
+            }
+        - {$ref: '#/components/parameters/Order'}
+      responses:
+        '200': {$ref: '#/components/responses/Page'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: [Invitations]
+      summary: Invite an email address to the organization
+      description: The invitation token is delivered by email and is never returned in this response.
+      requestBody: {$ref: '#/components/requestBodies/Invite'}
+      responses:
+        '201': {$ref: '#/components/responses/Created'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/invitations/{invitationID}/resend:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/InvitationID'}
+    post:
+      tags: [Invitations]
+      summary: Resend a pending invitation and rotate its token
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/invitations/{invitationID}/revoke:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/InvitationID'}
+    post:
+      tags: [Invitations]
+      summary: Revoke a pending invitation
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/invitations/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        description: One-time invitation bearer token.
+        schema: {type: string, minLength: 43, maxLength: 512}
+    get:
+      tags: [Invitations]
+      summary: Preview an invitation
+      security: []
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/invitations/accept:
+    post:
+      tags: [Invitations]
+      summary: Accept an invitation and issue a session
+      description: Existing users may send only token with a bearer session; new users also send password, first_name, and last_name.
+      security:
+        - {}
+        - bearerAuth: []
+      requestBody: {$ref: '#/components/requestBodies/AcceptInvitation'}
+      responses:
+        '201': {$ref: '#/components/responses/Created'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/api-keys:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+    get:
+      tags: [API keys]
+      summary: List API keys
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - name: include_revoked
+          in: query
+          schema: {type: boolean, default: false}
+        - name: sort
+          in: query
+          schema:
+            {
+              type: string,
+              enum: [created_at, expires_at, last_used_at],
+              default: created_at,
+            }
+        - {$ref: '#/components/parameters/Order'}
+      responses:
+        '200': {$ref: '#/components/responses/Page'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: [API keys]
+      summary: Create an API key
+      description: The secret is returned once in this response; store it securely.
+      requestBody: {$ref: '#/components/requestBodies/CreateAPIKey'}
+      responses:
+        '201': {$ref: '#/components/responses/Created'}
+        default: {$ref: '#/components/responses/Error'}
+  /api/v1/organizations/{orgID}/api-keys/{apiKeyID}:
+    parameters:
+      - {$ref: '#/components/parameters/OrgID'}
+      - {$ref: '#/components/parameters/APIKeyID'}
+    delete:
+      tags: [API keys]
+      summary: Revoke an API key
+      responses:
+        '200': {$ref: '#/components/responses/Ok'}
+        default: {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    OrgID:
+      {
+        name: orgID,
+        in: path,
+        required: true,
+        schema: {type: string, format: uuid},
+      }
+    MembershipID:
+      {
+        name: membershipID,
+        in: path,
+        required: true,
+        schema: {type: string, format: uuid},
+      }
+    RoleID:
+      {
+        name: roleID,
+        in: path,
+        required: true,
+        schema: {type: string, format: uuid},
+      }
+    TeamID:
+      {
+        name: teamID,
+        in: path,
+        required: true,
+        schema: {type: string, format: uuid},
+      }
+    TeamMemberID:
+      {
+        name: teamMemberID,
+        in: path,
+        required: true,
+        schema: {type: string, format: uuid},
+      }
+    ProjectID:
+      {
+        name: projectID,
+        in: path,
+        required: true,
+        schema: {type: string, format: uuid},
+      }
+    TaskID:
+      {
+        name: taskID,
+        in: path,
+        required: true,
+        schema: {type: string, format: uuid},
+      }
+    InvitationID:
+      {
+        name: invitationID,
+        in: path,
+        required: true,
+        schema: {type: string, format: uuid},
+      }
+    APIKeyID:
+      {
+        name: apiKeyID,
+        in: path,
+        required: true,
+        schema: {type: string, format: uuid},
+      }
+    Page:
+      name: page
+      in: query
+      schema: {type: integer, minimum: 1, default: 1}
+    PageSize:
+      name: page_size
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+    Order:
+      name: order
+      in: query
+      schema: {type: string, enum: [asc, desc], default: desc}
+  requestBodies:
+    Register:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/RegisterRequest'}
+    Login:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/LoginRequest'}
+    Refresh:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/RefreshRequest'}
+    Organization:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/OrganizationRequest'}
+    AssignRole:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AssignRoleRequest'}
+    Role:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/RoleRequest'}
+    Team:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/TeamRequest'}
+    TeamMember:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/TeamMemberRequest'}
+    CreateProject:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CreateProjectRequest'}
+    UpdateProject:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/UpdateProjectRequest'}
+    CreateTask:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CreateTaskRequest'}
+    UpdateTask:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/UpdateTaskRequest'}
+    Invite:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/InviteRequest'}
+    AcceptInvitation:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AcceptInvitationRequest'}
+    CreateAPIKey:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/CreateAPIKeyRequest'}
+  responses:
+    Ok:
+      description: Request completed successfully.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/SuccessEnvelope'}
+    Created:
+      description: Resource created successfully.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/SuccessEnvelope'}
+    Page:
+      description: Paginated collection response.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/PageEnvelope'}
+    Error:
+      description: Error response; internal details are not exposed.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  schemas:
+    SuccessEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          description: Endpoint-specific DTO, array, or small status object.
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: array
+              items: {type: object, additionalProperties: true}
+            - type: string
+            - type: boolean
+    PageEnvelope:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items: {type: object, additionalProperties: true}
+        pagination: {$ref: '#/components/schemas/Pagination'}
+    Pagination:
+      type: object
+      required: [page, page_size, total, total_pages]
+      properties:
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1, maximum: 100}
+        total: {type: integer, minimum: 0}
+        total_pages: {type: integer, minimum: 0}
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+            details:
+              type: object
+              additionalProperties: {type: string}
+            request_id: {type: string}
+    RegisterRequest:
+      type: object
+      required: [email, password, first_name, last_name, organization_name]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, format: password, minLength: 12, maxLength: 72}
+        first_name: {type: string, maxLength: 100}
+        last_name: {type: string, maxLength: 100}
+        organization_name: {type: string, maxLength: 150}
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, format: password}
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: {type: string}
+    OrganizationRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 150}
+    AssignRoleRequest:
+      type: object
+      required: [role_id]
+      properties:
+        role_id: {type: string, format: uuid}
+    RoleRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 100}
+        description: {type: string, maxLength: 500}
+        permissions:
+          type: array
+          maxItems: 20
+          items: {type: string}
+    TeamRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 100}
+        description: {type: string, maxLength: 500}
+    TeamMemberRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id: {type: string, format: uuid}
+    CreateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 150}
+        description: {type: [string, 'null'], maxLength: 5000}
+        team_id: {type: [string, 'null'], format: uuid}
+        status:
+          {type: string, enum: [planning, active, on_hold, completed, archived]}
+        priority: {type: string, enum: [low, medium, high, urgent]}
+        start_date: {type: [string, 'null'], format: date}
+        due_date: {type: [string, 'null'], format: date}
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name: {type: string, maxLength: 150}
+        description: {type: [string, 'null'], maxLength: 5000}
+        team_id: {type: [string, 'null'], format: uuid}
+        status:
+          {type: string, enum: [planning, active, on_hold, completed, archived]}
+        priority: {type: string, enum: [low, medium, high, urgent]}
+        start_date: {type: [string, 'null'], format: date}
+        due_date: {type: [string, 'null'], format: date}
+    CreateTaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title: {type: string, maxLength: 200}
+        description: {type: [string, 'null'], maxLength: 5000}
+        status:
+          {
+            type: string,
+            enum: [todo, in_progress, blocked, in_review, done, cancelled],
+          }
+        priority: {type: string, enum: [low, medium, high, urgent]}
+        assignee_id: {type: [string, 'null'], format: uuid}
+        due_date: {type: [string, 'null'], format: date}
+    UpdateTaskRequest:
+      type: object
+      properties:
+        title: {type: string, maxLength: 200}
+        description: {type: [string, 'null'], maxLength: 5000}
+        status:
+          {
+            type: string,
+            enum: [todo, in_progress, blocked, in_review, done, cancelled],
+          }
+        priority: {type: string, enum: [low, medium, high, urgent]}
+        assignee_id: {type: [string, 'null'], format: uuid}
+        due_date: {type: [string, 'null'], format: date}
+    InviteRequest:
+      type: object
+      required: [email, role_id]
+      properties:
+        email: {type: string, format: email}
+        role_id: {type: string, format: uuid}
+    AcceptInvitationRequest:
+      type: object
+      required: [token]
+      properties:
+        token: {type: string, minLength: 43, maxLength: 512}
+        password: {type: string, format: password, minLength: 12, maxLength: 72}
+        first_name: {type: string, maxLength: 100}
+        last_name: {type: string, maxLength: 100}
+    CreateAPIKeyRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 100}
+        expires_in_days: {type: integer, minimum: 0}
+    User:
+      type: object
+      required: [id, email, first_name, last_name, status, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        first_name: {type: string}
+        last_name: {type: string}
+        avatar_url: {type: [string, 'null'], format: uri}
+        status: {type: string}
+        email_verified_at: {type: [string, 'null'], format: date-time}
+        last_login_at: {type: [string, 'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+    Organization:
+      type: object
+      required: [id, name, slug, status, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        slug: {type: string}
+        status: {type: string}
+        role: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    Project:
+      type: object
+      required:
+        [
+          id,
+          organization_id,
+          name,
+          status,
+          priority,
+          created_by,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        id: {type: string, format: uuid}
+        organization_id: {type: string, format: uuid}
+        team_id: {type: [string, 'null'], format: uuid}
+        name: {type: string}
+        description: {type: [string, 'null']}
+        status: {type: string}
+        priority: {type: string}
+        start_date: {type: [string, 'null'], format: date}
+        due_date: {type: [string, 'null'], format: date}
+        created_by: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    Task:
+      type: object
+      required:
+        [
+          id,
+          organization_id,
+          project_id,
+          title,
+          status,
+          priority,
+          created_by,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        id: {type: string, format: uuid}
+        organization_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        title: {type: string}
+        description: {type: [string, 'null']}
+        status: {type: string}
+        priority: {type: string}
+        assignee_id: {type: [string, 'null'], format: uuid}
+        due_date: {type: [string, 'null'], format: date}
+        created_by: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    AuthSession:
+      type: object
+      required: [access_token, refresh_token, token_type, expires_in, user]
+      properties:
+        access_token: {type: string}
+        refresh_token: {type: string}
+        token_type: {type: string, const: Bearer}
+        expires_in: {type: integer}
+        user: {$ref: '#/components/schemas/User'}
+    Member:
+      type: object
+      required:
+        [membership_id, user_id, email, first_name, last_name, role, status]
+      properties:
+        membership_id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        first_name: {type: string}
+        last_name: {type: string}
+        role: {type: string}
+        status: {type: string}
+        joined_at: {type: [string, 'null'], format: date-time}
+    Role:
+      type: object
+      required:
+        [
+          id,
+          organization_id,
+          name,
+          is_system,
+          permissions,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        id: {type: string, format: uuid}
+        organization_id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: [string, 'null']}
+        is_system: {type: boolean}
+        permissions:
+          type: array
+          items: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    Team:
+      type: object
+      required: [id, organization_id, name, created_by, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        organization_id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: [string, 'null']}
+        created_by: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    TeamMember:
+      type: object
+      required: [id, user_id, email, first_name, last_name, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        first_name: {type: string}
+        last_name: {type: string}
+        created_at: {type: string, format: date-time}
+    Invitation:
+      type: object
+      required:
+        [
+          id,
+          organization_id,
+          email,
+          role_id,
+          status,
+          invited_by,
+          expires_at,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        id: {type: string, format: uuid}
+        organization_id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        role_id: {type: string, format: uuid}
+        role_name: {type: string}
+        status: {type: string, enum: [pending, accepted, revoked, expired]}
+        invited_by: {type: string, format: uuid}
+        expires_at: {type: string, format: date-time}
+        accepted_at: {type: [string, 'null'], format: date-time}
+        accepted_by: {type: [string, 'null'], format: uuid}
+        revoked_at: {type: [string, 'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    InvitationPreview:
+      type: object
+      required:
+        [
+          organization_id,
+          organization_name,
+          email,
+          role_name,
+          status,
+          expires_at,
+          account_exists,
+        ]
+      properties:
+        organization_id: {type: string, format: uuid}
+        organization_name: {type: string}
+        email: {type: string, format: email}
+        role_name: {type: string}
+        status: {type: string, enum: [pending, accepted, revoked, expired]}
+        expires_at: {type: string, format: date-time}
+        account_exists: {type: boolean}
+        accepted_by: {type: [string, 'null'], format: uuid}
+    APIKey:
+      type: object
+      required:
+        [
+          id,
+          organization_id,
+          created_by,
+          name,
+          key_prefix,
+          key_last_four,
+          status,
+          expires_at,
+          created_at,
+        ]
+      properties:
+        id: {type: string, format: uuid}
+        organization_id: {type: string, format: uuid}
+        created_by: {type: string, format: uuid}
+        name: {type: string}
+        key_prefix: {type: string}
+        key_last_four: {type: string}
+        status: {type: string, enum: [active, expired, revoked]}
+        expires_at: {type: string, format: date-time}
+        revoked_at: {type: [string, 'null'], format: date-time}
+        last_used_at: {type: [string, 'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+    CreatedAPIKey:
+      type: object
+      required: [api_key, key, warning]
+      properties:
+        api_key: {$ref: '#/components/schemas/APIKey'}
+        key:
+          type: string
+          description: Secret shown only once. Do not log or persist in client-visible history.
+        warning: {type: string}

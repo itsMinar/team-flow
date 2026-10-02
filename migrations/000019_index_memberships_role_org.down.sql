@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_memberships_role_org;

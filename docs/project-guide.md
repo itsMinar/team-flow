@@ -739,49 +739,49 @@ make docker-down
 
 Configuration is loaded from environment variables at startup. Invalid configuration causes the process to exit before it serves traffic.
 
-| Variable                      | Default                 | Purpose                                                               |
-| ----------------------------- | ----------------------- | --------------------------------------------------------------------- |
-| `APP_ENV`                     | `development`           | Runtime environment: `development`, `test`, or `production`.          |
-| `APP_PORT`                    | `8080`                  | HTTP port for the API.                                                |
-| `DATABASE_URL`                | none                    | PostgreSQL connection URL. Required.                                  |
-| `DATABASE_MAX_CONNS`          | `20`                    | Maximum PostgreSQL pool connections.                                  |
-| `DATABASE_MIN_CONNS`          | `2`                     | Minimum PostgreSQL pool connections.                                  |
-| `DATABASE_MAX_CONN_LIFETIME`  | `1h`                    | Maximum connection lifetime.                                          |
-| `DATABASE_MAX_CONN_IDLE_TIME` | `30m`                   | Maximum idle connection time.                                         |
-| `REDIS_URL`                   | none                    | Redis connection URL. Required.                                       |
-| `HTTP_READ_TIMEOUT`           | `15s`                   | HTTP request read timeout.                                            |
-| `HTTP_WRITE_TIMEOUT`          | `15s`                   | HTTP response write timeout.                                          |
-| `HTTP_IDLE_TIMEOUT`           | `60s`                   | Keep-alive idle timeout.                                              |
-| `HTTP_SHUTDOWN_TIMEOUT`       | `15s`                   | Graceful shutdown timeout.                                            |
-| `HTTP_MAX_BODY_BYTES`         | `1048576`               | Maximum request body size, 1 MiB by default.                          |
-| `LOG_LEVEL`                   | `info`                  | `debug`, `info`, `warn`, or `error`.                                  |
-| `JWT_SECRET`                  | none                    | Signing secret. Required; production requires at least 32 characters. |
-| `JWT_ISSUER`                  | `teamflow`              | JWT issuer claim.                                                     |
-| `JWT_ACCESS_TTL`              | `15m`                   | Access-token lifetime.                                                |
-| `JWT_REFRESH_TTL`             | `720h`                  | Refresh-token lifetime and must exceed access TTL.                    |
-| `METRICS_ENABLED`             | `true`                  | Serves the Prometheus endpoint; restrict it at the edge.              |
-| `METRICS_ADDR`                | `:9091`                 | Worker metrics listener; the API serves `/metrics` itself.            |
-| `RATE_LIMIT_ENABLED`          | `production`            | Rate limiting on; defaults to enabled in production only.             |
-| `RATE_LIMIT_FAIL_OPEN`        | `true`                  | Allow requests when the limiter is unreachable.                       |
-| `RATE_LIMIT_AUTH_LIMIT`       | `10`                    | Unauthenticated requests per period, keyed by IP.                     |
-| `RATE_LIMIT_AUTH_PERIOD`      | `1m`                    | Period for the authentication limit.                                  |
-| `RATE_LIMIT_USER_LIMIT`       | `300`                   | Session requests per period, keyed by user.                           |
-| `RATE_LIMIT_USER_PERIOD`      | `1m`                    | Period for the user limit.                                            |
-| `RATE_LIMIT_API_KEY_LIMIT`    | `600`                   | API key requests per period, keyed by key.                            |
-| `RATE_LIMIT_API_KEY_PERIOD`   | `1m`                    | Period for the API key limit.                                         |
-| `API_KEY_DEFAULT_TTL`         | `2160h`                 | API key lifetime when a request does not specify one.                 |
-| `API_KEY_MAX_TTL`             | `8760h`                 | Maximum API key lifetime; keys never outlive this bound.              |
-| `WORKER_CONCURRENCY`          | `4`                     | Size of the background worker pool.                                   |
-| `WORKER_BLOCK_TIMEOUT`        | `2s`                    | How long a consumer blocks waiting for work.                          |
-| `WORKER_STALE_AFTER`          | `5m`                    | Idle time before another worker may reclaim a job.                    |
-| `WORKER_SHUTDOWN_TIMEOUT`     | `15s`                   | How long shutdown waits for the in-flight job.                        |
-| `WORKER_MAX_ATTEMPTS`         | `5`                     | Attempts before a job is dead-lettered.                               |
-| `WORKER_RETRY_BASE_DELAY`     | `30s`                   | First retry delay; doubles per attempt.                               |
-| `WORKER_RETRY_MAX_DELAY`      | `1h`                    | Upper bound on the retry delay.                                       |
-| `JOB_ENCRYPTION_KEY`          | derived                 | Encrypts job payloads in Redis; derived from `JWT_SECRET`.            |
-| `INVITATION_BASE_URL`         | `http://localhost:3000` | Public origin of the client that renders the accept page.             |
-| `INVITATION_TTL`              | `168h`                  | Invitation lifetime; must be positive and at most 720h.               |
-| `MAIL_TRANSPORT`              | `log`                   | Transactional mail transport: `log` or `none`.                        |
+| Variable                      | Default                 | Purpose                                                                                                     |
+| ----------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `APP_ENV`                     | `development`           | Runtime environment: `development`, `test`, or `production`.                                                |
+| `APP_PORT`                    | `8080`                  | HTTP port for the API.                                                                                      |
+| `DATABASE_URL`                | none                    | PostgreSQL connection URL. Production requires certificate-verifying TLS and a non-bypass application role. |
+| `DATABASE_MAX_CONNS`          | `20`                    | Maximum PostgreSQL pool connections.                                                                        |
+| `DATABASE_MIN_CONNS`          | `2`                     | Minimum PostgreSQL pool connections.                                                                        |
+| `DATABASE_MAX_CONN_LIFETIME`  | `1h`                    | Maximum connection lifetime.                                                                                |
+| `DATABASE_MAX_CONN_IDLE_TIME` | `30m`                   | Maximum idle connection time.                                                                               |
+| `REDIS_URL`                   | none                    | Redis connection URL. Production requires `rediss://`.                                                      |
+| `HTTP_READ_TIMEOUT`           | `15s`                   | HTTP request read timeout.                                                                                  |
+| `HTTP_WRITE_TIMEOUT`          | `15s`                   | HTTP response write timeout.                                                                                |
+| `HTTP_IDLE_TIMEOUT`           | `60s`                   | Keep-alive idle timeout.                                                                                    |
+| `HTTP_SHUTDOWN_TIMEOUT`       | `15s`                   | Graceful shutdown timeout.                                                                                  |
+| `HTTP_MAX_BODY_BYTES`         | `1048576`               | Maximum request body size, 1 MiB by default.                                                                |
+| `LOG_LEVEL`                   | `info`                  | `debug`, `info`, `warn`, or `error`.                                                                        |
+| `JWT_SECRET`                  | none                    | Signing secret. Required; production requires a non-example secret of at least 32 characters.               |
+| `JWT_ISSUER`                  | `teamflow`              | JWT issuer claim.                                                                                           |
+| `JWT_ACCESS_TTL`              | `15m`                   | Access-token lifetime.                                                                                      |
+| `JWT_REFRESH_TTL`             | `720h`                  | Refresh-token lifetime and must exceed access TTL.                                                          |
+| `METRICS_ENABLED`             | `true`                  | Serves the Prometheus endpoint; restrict it at the edge.                                                    |
+| `METRICS_ADDR`                | `:9091`                 | Worker metrics listener; the API serves `/metrics` itself.                                                  |
+| `RATE_LIMIT_ENABLED`          | `production`            | Rate limiting on; defaults to enabled in production only.                                                   |
+| `RATE_LIMIT_FAIL_OPEN`        | `true`                  | Allow requests when the limiter is unreachable.                                                             |
+| `RATE_LIMIT_AUTH_LIMIT`       | `10`                    | Unauthenticated requests per period, keyed by IP.                                                           |
+| `RATE_LIMIT_AUTH_PERIOD`      | `1m`                    | Period for the authentication limit.                                                                        |
+| `RATE_LIMIT_USER_LIMIT`       | `300`                   | Session requests per period, keyed by user.                                                                 |
+| `RATE_LIMIT_USER_PERIOD`      | `1m`                    | Period for the user limit.                                                                                  |
+| `RATE_LIMIT_API_KEY_LIMIT`    | `600`                   | API key requests per period, keyed by key.                                                                  |
+| `RATE_LIMIT_API_KEY_PERIOD`   | `1m`                    | Period for the API key limit.                                                                               |
+| `API_KEY_DEFAULT_TTL`         | `2160h`                 | API key lifetime when a request does not specify one.                                                       |
+| `API_KEY_MAX_TTL`             | `8760h`                 | Maximum API key lifetime; keys never outlive this bound.                                                    |
+| `WORKER_CONCURRENCY`          | `4`                     | Size of the background worker pool.                                                                         |
+| `WORKER_BLOCK_TIMEOUT`        | `2s`                    | How long a consumer blocks waiting for work.                                                                |
+| `WORKER_STALE_AFTER`          | `5m`                    | Idle time before another worker may reclaim a job.                                                          |
+| `WORKER_SHUTDOWN_TIMEOUT`     | `15s`                   | How long shutdown waits for the in-flight job.                                                              |
+| `WORKER_MAX_ATTEMPTS`         | `5`                     | Attempts before a job is dead-lettered.                                                                     |
+| `WORKER_RETRY_BASE_DELAY`     | `30s`                   | First retry delay; doubles per attempt.                                                                     |
+| `WORKER_RETRY_MAX_DELAY`      | `1h`                    | Upper bound on the retry delay.                                                                             |
+| `JOB_ENCRYPTION_KEY`          | derived in dev/test     | Encrypts Redis job payloads; production requires an independent secret of at least 32 characters.           |
+| `INVITATION_BASE_URL`         | `http://localhost:3000` | Public origin of the client that renders the accept page; production requires HTTPS.                        |
+| `INVITATION_TTL`              | `168h`                  | Invitation lifetime; must be positive and at most 720h.                                                     |
+| `MAIL_TRANSPORT`              | `log`                   | Transactional mail transport: `log` or `none`.                                                              |
 
 `MAIL_TRANSPORT=log` writes the invitation link to the application log so the
 accept flow can be followed without an SMTP server. It is rejected when
@@ -1089,7 +1089,11 @@ The following capabilities are planned and should not be assumed to exist yet:
 - Dashboards and alert rules built on the Prometheus metrics
 - An OpenTelemetry trace exporter; identifiers propagate today, but nothing is
   sampled or shipped
-- Further production hardening
+- A real production email transport; `none` disables invitations and `log` is
+  rejected in production.
+- Provider-specific deployment manifests, managed backup policies, and alerting
+  resources; requirements and recovery procedures are in
+  [`docs/production-operations.md`](production-operations.md).
 
 The planned roadmap is:
 
@@ -1105,8 +1109,8 @@ The planned roadmap is:
 10. Background jobs - complete
 11. Rate limiting - complete
 12. Audit and observability - complete
-13. Testing expansion - planned
-14. Production hardening - planned
+13. Testing expansion - complete
+14. Production hardening - complete
 
 Architecture decisions and the reasoning behind major security and infrastructure choices are recorded in [docs/decisions.md](decisions.md).
 
@@ -1120,13 +1124,17 @@ A practical order for continuing the project is:
    and enqueue notifications and other asynchronous work on the same queue.
 4. Add alerting rules, dashboards, and an OpenTelemetry exporter before exposing
    the API publicly.
-5. Expand OpenAPI or Postman documentation as each endpoint is added.
-6. Add production deployment configuration, secret management, metrics, tracing, backups, and migration runbooks.
+5. Keep the OpenAPI contract and Postman collection synchronized as routes change.
+6. Select a deployment provider and implement its infrastructure-specific
+   manifests, managed backups, alerting, and email transport using the
+   [`production operations guide`](production-operations.md).
 
 ## 15. Related Files
 
 - [README.md](../README.md): concise project overview and quick start.
 - [docs/decisions.md](decisions.md): architecture decision records.
+- [docs/openapi.yaml](openapi.yaml): machine-readable API contract.
+- [docs/production-operations.md](production-operations.md): deployment and recovery runbook.
 - [docs/TeamFlow.postman_collection.json](TeamFlow.postman_collection.json): Postman collection.
 - [.env.example](../.env.example): local environment template.
 - [docker-compose.yml](../docker-compose.yml): local service definitions.

@@ -4,11 +4,13 @@ TeamFlow is a production-grade, multi-tenant SaaS backend for project and
 employee management. Multiple independent organizations share the same
 infrastructure while their data stays strictly isolated.
 
-This repository is being built incrementally, phase by phase. **Phases 1
-(Foundation), 2 (Authentication), 3 (Multi-tenancy), 4 (RBAC), 5 (Teams), 6
-(Projects), 7 (Tasks), 8 (Invitations), 9 (API keys), 10 (Background jobs), and
-11 (Rate limiting), 12 (Audit and observability), and 13 (Testing) are complete.** See
-[Roadmap](#roadmap) for what is done and what comes next.
+This repository is being built incrementally, phase by phase. **Phases 1-14 are
+complete**, including authentication, tenant isolation, core project/task
+workflows, audit/observability, testing, and production hardening. See
+[Roadmap](#roadmap) for remaining operational follow-ups.
+
+The current API contract is in [OpenAPI](docs/openapi.yaml); deployment and
+recovery requirements are in [Production Operations](docs/production-operations.md).
 
 ## Overview
 
@@ -200,6 +202,9 @@ both application services and rejects a missing `JWT_SECRET` before startup.
 Use a long, random secret in production (at least 32 characters); the example
 secret is for local development only. Access tokens default to 15 minutes and
 refresh tokens to 720 hours. Secrets are never committed; `.env` is gitignored.
+Production additionally requires verified PostgreSQL TLS, a TLS Redis URL, an
+independent `JOB_ENCRYPTION_KEY`, and an HTTPS invitation origin. See
+[Production Operations](docs/production-operations.md) before deploying.
 
 ## Authentication
 
@@ -578,6 +583,6 @@ redis-cli XLEN  teamflow:jobs:dead     # dead-lettered jobs
 - [x] Phase 12 — Audit and observability: append-only audit log, Prometheus
       metrics, and trace propagation
 - [x] Phase 13 — Testing: unit, integration, security, tenant-isolation, and race checks
-- [ ] Phase 14 — Production hardening
+- [x] Phase 14 — Production hardening: runtime config, database role checks, secure Compose defaults, API/operations docs
 
 Architecture decisions are recorded in [`docs/decisions.md`](docs/decisions.md).

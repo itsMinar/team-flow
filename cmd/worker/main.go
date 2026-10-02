@@ -66,6 +66,11 @@ func run() error {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer db.Close()
+	if cfg.IsProduction() {
+		if err := db.CheckRLSRole(ctx); err != nil {
+			return fmt.Errorf("verify production database role: %w", err)
+		}
+	}
 	logger.Info("connected to postgres")
 
 	redisClient, err := cache.New(ctx, cfg.Redis)
